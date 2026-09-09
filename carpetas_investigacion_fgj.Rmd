@@ -1,0 +1,97 @@
+---
+title: "Proyecto carpetas investigacion FGJ"
+author: "Pablo Nopala Abrin"
+date: "2026-09-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# CARPETAS DE INVESTIGACIÓN - FGJ CDMX
+# Acumulado 2016-2024
+
+# Instalar paquetes
+```{r setup, include=FALSE, eval=FALSE}
+install.packages("httr")
+install.packages("jsonlite")
+install.packages("tidyverse")
+```
+
+# Cargar paquetes
+```{r}
+library(httr)
+library(jsonlite)
+library(tidyverse)
+```
+
+
+#  Conectar con la API de Datos Abiertos de CDMX
+```{r}
+url_conjunto <- paste0(
+  "https://datos.cdmx.gob.mx/api/3/action/package_show?id=",
+  "carpetas-de-investigacion-fgj-de-la-ciudad-de-mexico"
+)
+
+respuesta <- httr::GET(url_conjunto)
+
+```
+
+
+# Verificar que la conexión haya sido exitosa
+
+```{r}
+httr::stop_for_status(respuesta)
+```
+
+# Convertir la respuesta de la API a R
+```{r}
+informacion <- jsonlite::fromJSON(
+  httr::content(
+    respuesta,
+    "text",
+    encoding = "UTF-8"
+  )
+)
+```
+
+
+# Obtener la información de los recursos
+```{r}
+recursos <- informacion$result$resources
+```
+
+
+# Mostrar los recursos disponibles
+```{r}
+recursos[, c("name", "format", "id", "url")]
+```
+# Buscar el recurso Carpetas de Investigacion acumulado 2016-2024
+
+```{r}
+recurso_2016_2024 <- recursos[
+  grepl(
+    "acumulado 2016-2024",
+    recursos$name,
+    ignore.case = TRUE
+  ),
+]
+
+# Mostrar el resultado
+recurso_2016_2024[, c("name", "format", "id", "url")]
+```
+# Obtener la URL del CSV
+```{r}
+url_csv <- recurso_2016_2024$url[1]
+```
+
+# Leer datos
+```{r}
+datos <- readr::read_csv(
+  url_csv,
+  show_col_types = FALSE
+)
+```
+
+
+
