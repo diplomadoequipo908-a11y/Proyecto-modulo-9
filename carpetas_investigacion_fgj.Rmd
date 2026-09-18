@@ -23,6 +23,7 @@ install.packages("tidyverse")
 library(httr)
 library(jsonlite)
 library(tidyverse)
+library(hms)
 ```
 
 
@@ -92,6 +93,117 @@ datos <- readr::read_csv(
   show_col_types = FALSE
 )
 ```
+
+# Analisis exploratorio
+```{r}
+glimpse(datos)
+summary(datos)
+```
+#Vemos que existen columnas que necesitan tratamiento
+```{r}
+names(datos)
+str(datos)
+```
+#Primero nos centraremos en homogeneizar hora_inicio y hora_hecho usando regex, dado que existen valores que no cumplen con el formato HH:MM:SS
+```{r}
+datos <- datos %>%
+  mutate(
+    hora_inicio = if_else(
+      grepl(
+        "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$",
+        hora_inicio
+      ),
+      hora_inicio,
+      NA_character_
+    ),
+    hora_hecho = if_else(
+      grepl(
+        "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$",
+        hora_hecho
+      ),
+      hora_hecho,
+      NA_character_
+    )
+  )
+
+datos <- datos %>%
+  mutate(
+    hora_inicio = hms::as_hms(hora_inicio),
+    hora_hecho = hms::as_hms(hora_hecho)
+  )
+```
+
+#Ahora homogeneizamos las fechas
+```{r}
+summary(datos[, c(
+  "fecha_inicio",
+  "fecha_hecho",
+  "anio_inicio",
+  "mes_inicio",
+  "anio_hecho",
+  "mes_hecho"
+)])
+```
+# Se identificó un registro con anio_hecho = 222 y fecha_hecho = NA. Debido a que no existe información suficiente para determinar el año real del hecho, el valor se consideró inválido y se reemplazó por NA.
+
+```{r}
+datos %>%
+  filter(anio_hecho == 222) %>%
+  select(
+    fecha_hecho,
+    anio_hecho,
+    mes_hecho,
+    fecha_inicio,
+    anio_inicio,
+    delito
+  ) %>%
+  head(30)
+```
+
+```{r}
+datos <- datos %>%
+  mutate(
+    anio_hecho = if_else(
+      anio_hecho == 222,
+      NA,
+      anio_hecho
+    )
+  )
+```
+
+
+#Vamos a inspeccionar los NAs en fecha_inicio
+```{r}
+datos %>%
+  filter(is.na(fecha_inicio)) %>%
+  select(
+    fecha_inicio,
+    anio_inicio,
+    mes_inicio,
+    fecha_hecho,
+    anio_hecho,
+    delito,
+    categoria_delito
+  )
+```
+#Veamos que a pesar de tener informacion, no se conoce la fecha exacta en la que se abrieron las carpetas respectivas a estos delitos, sin embargo, conocemos el año de inicio, por lo que no eliminaremos estos registros. 
+
+#Ahora analizaremos los NAs en fecha_hecho
+```{r}
+datos %>%
+  filter(is.na(fecha_hecho)) %>%
+  select(
+    fecha_inicio,
+    anio_inicio,
+    mes_inicio,
+    fecha_hecho,
+    anio_hecho,
+    delito,
+    categoria_delito
+  )
+```
+
+
 
 
 
