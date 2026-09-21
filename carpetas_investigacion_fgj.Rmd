@@ -24,6 +24,8 @@ library(httr)
 library(jsonlite)
 library(tidyverse)
 library(hms)
+library(scales)
+library(ggrepel)
 ```
 
 
@@ -202,6 +204,642 @@ datos %>%
     categoria_delito
   )
 ```
+# Vamos a analizar las columnas restantes
+```{r}
+datos %>%
+  summarise(
+    categorias = n_distinct(categoria_delito),
+    delitos = n_distinct(delito),
+    alcaldias = n_distinct(alcaldia_hecho),
+    alcaldias_catalogo = n_distinct(alcaldia_catalogo),
+    colonias = n_distinct(colonia_hecho),
+    colonias_catalogo = n_distinct(colonia_catalogo),
+    fiscalias = n_distinct(fiscalia),
+    competencias = n_distinct(competencia)
+  )
+```
+# Para temas del anÃ¡lisis, utulizaremos alcaldia_hecho y colonia_hecho como variables territoriales principales debido a una discrepancia alta en el numero de registros poblados, alcaldia_catalogo y colonia_catalogo no cuentan con informacion correcta acerca de los delitos 
+```{r}
+datos_filtrados <- datos %>%
+  select(-colonia_catalogo, -alcaldia_catalogo) %>%
+  mutate(
+    across(
+      c(delito, categoria_delito, competencia, fiscalia, colonia_hecho, alcaldia_hecho),
+      ~ str_to_sentence(str_to_lower(str_squish(.x)))
+    )
+  )
+```
+
+# AnÃ¡lisis principal, categoria_delito
+```{r}
+
+
+tabla_categorias <- datos_filtrados %>%
+  filter(!is.na(categoria_delito)) %>%
+  count(categoria_delito, sort = TRUE) %>%
+  mutate(
+    porcentaje = n / sum(n) * 100
+  )
+
+windows(width = 14, height = 9)
+
+grafico_categorias <- ggplot(
+  tabla_categorias,
+  aes(
+    x = reorder(categoria_delito, n),
+    y = n
+  )
+) +
+  geom_col(
+    width = 0.7,
+    fill = "#2C5F7C"
+  ) +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(n),
+        " (",
+        round(porcentaje, 1),
+        "%)"
+      )
+    ),
+    hjust = -0.08,
+    size = 4
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0, 0.22))
+  ) +
+  labs(
+    title = "Distribución de carpetas de investigación por categoría delictiva",
+    subtitle = "Ciudad de México | Registros de la Fiscalía General de Justicia",
+    x = NULL,
+    y = "Número de carpetas de investigación",
+    caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666"
+    ),
+    axis.text.y = element_text(
+      size = 11
+    ),
+    axis.text.x = element_text(
+      size = 10
+    ),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0
+    ),
+    plot.margin = margin(20, 50, 20, 20)
+  )
+
+print(grafico_categorias)
+```
+
+#Ya que vimos que la mayor parte de los delitos corresponden a delitos de bajo impacto, ahora enfatizaremos en los delitos pertenecientes a esta categoria
+
+```{r}
+bajo_impacto <- datos_filtrados %>%
+  filter(categoria_delito == "Delito de bajo impacto") %>%
+  count(delito, sort = TRUE) %>%
+  mutate(
+    porcentaje = n / sum(n) * 100
+  )
+
+
+bajo_impacto_top20 <- bajo_impacto %>%
+  slice_max(order_by = n, n = 20)
+
+grafico_bajo_impacto <- ggplot(
+  bajo_impacto_top20,
+  aes(
+    x = reorder(delito, n),
+    y = n
+  )
+) +
+  geom_col(
+    width = 0.7,
+    fill = "#2C5F7C"
+  ) +
+  geom_text(
+    aes(
+      label = paste0(
+        scales::comma(n),
+        " (",
+        round(porcentaje, 1),
+        "%)"
+      )
+    ),
+    hjust = -0.08,
+    size = 4
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0, 0.22))
+  ) +
+  labs(
+    title = "Distribución de delitos clasificados como de bajo impacto",
+    subtitle = "Ciudad de México | 20 delitos con mayor número de carpetas de investigación",
+    x = NULL,
+    y = "Número de carpetas de investigación",
+    caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666"
+    ),
+    axis.text.y = element_text(
+      size = 11
+    ),
+    axis.text.x = element_text(
+      size = 10
+    ),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0
+    ),
+    plot.margin = margin(20, 50, 20, 20)
+  )
+
+print(grafico_bajo_impacto)
+```
+#Veamos la evolución de los diferentes delitos a lo largo del tiempo
+```{r}
+#Todos los delitos
+temporal_categoria <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2024,
+    !is.na(categoria_delito)
+  ) %>%
+  count(anio_inicio, categoria_delito)
+
+#Delito con mayor número de carpetas
+categoria_principal <- temporal_categoria %>%
+  group_by(categoria_delito) %>%
+  summarise(
+    total = sum(n),
+    .groups = "drop"
+  ) %>%
+  slice_max(total, n = 1) %>%
+  pull(categoria_delito)
+# Obtener valores de 2024
+etiquetas_2024 <- temporal_categoria %>%
+  filter(anio_inicio == 2024) %>%
+  arrange(desc(n))
+
+# Crear posiciones ordenadas para las etiquetas
+# Se distribuyen verticalmente en el lado derecho
+etiquetas_2024 <- etiquetas_2024 %>%
+  mutate(
+    posicion_etiqueta = seq(
+      from = max(temporal_categoria$n) * 0.95,
+      to   = max(temporal_categoria$n) * 0.05,
+      length.out = n()
+    )
+  )
+
+grafico_temporal_categorias <- ggplot() +
+
+  # Líneas de todas las categorías
+  geom_line(
+    data = temporal_categoria,
+    aes(
+      x = anio_inicio,
+      y = n,
+      group = categoria_delito
+    ),
+    color = "#A8B8C2",
+    linewidth = 0.8,
+    alpha = 0.7
+  ) +
+
+  # Puntos de todas las categorías
+  geom_point(
+    data = temporal_categoria,
+    aes(
+      x = anio_inicio,
+      y = n,
+      group = categoria_delito
+    ),
+    color = "#A8B8C2",
+    size = 2,
+    alpha = 0.7
+  ) +
+
+  # Línea de la categoría principal
+  geom_line(
+    data = temporal_categoria %>%
+      filter(categoria_delito == categoria_principal),
+    aes(
+      x = anio_inicio,
+      y = n
+    ),
+    color = "#2C5F7C",
+    linewidth = 1.5
+  ) +
+
+  # Puntos de la categoría principal
+  geom_point(
+    data = temporal_categoria %>%
+      filter(categoria_delito == categoria_principal),
+    aes(
+      x = anio_inicio,
+      y = n
+    ),
+    color = "#2C5F7C",
+    size = 3
+  ) +
+
+  # Líneas que conectan 2024 con las etiquetas
+  geom_segment(
+    data = etiquetas_2024,
+    aes(
+      x = 2024,
+      xend = 2024.7,
+      y = n,
+      yend = posicion_etiqueta
+    ),
+    color = "#B8C3C9",
+    linewidth = 0.4
+  ) +
+
+  # Etiquetas a la derecha
+  geom_text(
+    data = etiquetas_2024,
+    aes(
+      x = 2024.75,
+      y = posicion_etiqueta,
+      label = categoria_delito
+    ),
+    hjust = 0,
+    size = 3.2,
+    color = "#555555"
+  ) +
+
+  scale_x_continuous(
+    breaks = 2016:2024,
+    limits = c(2016, 2028)
+  ) +
+
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0.02, 0.08))
+  ) +
+
+  labs(
+    title = "Evolución de las carpetas de investigación por categoría delictiva",
+    subtitle = paste0(
+      "Ciudad de México | 2016-2024"
+    ),
+    x = "Año de inicio",
+    y = "Número de carpetas de investigación",
+    caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
+  ) +
+
+  theme_minimal(base_size = 14) +
+
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666",
+      margin = margin(b = 15)
+    ),
+
+    axis.text.x = element_text(
+      size = 11
+    ),
+
+    axis.text.y = element_text(
+      size = 10,
+      color = "#555555"
+    ),
+
+    axis.title = element_text(
+      size = 11
+    ),
+
+    panel.grid.major.y = element_line(
+      color = "#E5E5E5",
+      linewidth = 0.4
+    ),
+
+    panel.grid.major.x = element_blank(),
+
+    panel.grid.minor = element_blank(),
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0,
+      margin = margin(t = 15)
+    ),
+
+    plot.margin = margin(
+      20, 40, 20, 20
+    )
+  )
+
+windows(width = 18, height = 10)
+
+print(grafico_temporal_categorias)
+```
+
+# Ahora analizaremos los delitos pertenecientes a delitos de bajo impacto y su evolución a lo largo del tiempo
+```{r}
+# top 10
+
+top10_delitos <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2024,
+    categoria_delito == "Delito de bajo impacto",
+    !is.na(delito)
+  ) %>%
+  count(delito, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  pull(delito)
+
+
+# serie temporal
+
+temporal_bajo_impacto <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2024,
+    categoria_delito == "Delito de bajo impacto",
+    delito %in% top10_delitos
+  ) %>%
+  count(anio_inicio, delito)
+
+
+# delito principal
+
+delito_principal <- temporal_bajo_impacto %>%
+  group_by(delito) %>%
+  summarise(
+    total = sum(n),
+    .groups = "drop"
+  ) %>%
+  slice_max(
+    order_by = total,
+    n = 1,
+    with_ties = FALSE
+  ) %>%
+  pull(delito)
+
+# etiquetas
+
+etiquetas_finales <- temporal_bajo_impacto %>%
+  filter(anio_inicio == 2024) %>%
+  arrange(desc(n)) %>%
+  mutate(
+    posicion_etiqueta = seq(
+      from = max(n),
+      to = min(n),
+      length.out = n()
+    )
+  )
+
+
+# gráfico
+
+grafico_temporal_bajo_impacto <- ggplot() +
+
+  # líneas secundarias
+
+  geom_line(
+    data = temporal_bajo_impacto %>%
+      filter(delito != delito_principal),
+    aes(
+      x = anio_inicio,
+      y = n,
+      group = delito
+    ),
+    color = "#9E9E9E",
+    linewidth = 0.8,
+    alpha = 0.8
+  ) +
+
+  geom_point(
+    data = temporal_bajo_impacto %>%
+      filter(delito != delito_principal),
+    aes(
+      x = anio_inicio,
+      y = n,
+      group = delito
+    ),
+    color = "#9E9E9E",
+    size = 2.2,
+    alpha = 0.85
+  ) +
+
+  # línea principal
+
+  geom_line(
+    data = temporal_bajo_impacto %>%
+      filter(delito == delito_principal),
+    aes(
+      x = anio_inicio,
+      y = n,
+      group = delito
+    ),
+    color = "#2C5F7C",
+    linewidth = 1.8
+  ) +
+
+  geom_point(
+    data = temporal_bajo_impacto %>%
+      filter(delito == delito_principal),
+    aes(
+      x = anio_inicio,
+      y = n
+    ),
+    color = "#2C5F7C",
+    size = 3.5
+  ) +
+
+  # conectores secundarios
+
+  geom_segment(
+    data = etiquetas_finales %>%
+      filter(delito != delito_principal),
+    aes(
+      x = 2024,
+      xend = 2024.8,
+      y = n,
+      yend = posicion_etiqueta
+    ),
+    color = "#B0B0B0",
+    linewidth = 0.35
+  ) +
+
+  # conector principal
+
+  geom_segment(
+    data = etiquetas_finales %>%
+      filter(delito == delito_principal),
+    aes(
+      x = 2024,
+      xend = 2024.8,
+      y = n,
+      yend = posicion_etiqueta
+    ),
+    color = "#2C5F7C",
+    linewidth = 0.6
+  ) +
+
+  # etiquetas secundarias
+
+  geom_text(
+    data = etiquetas_finales %>%
+      filter(delito != delito_principal),
+    aes(
+      x = 2024.9,
+      y = posicion_etiqueta,
+      label = delito
+    ),
+    color = "#555555",
+    hjust = 0,
+    size = 3.8
+  ) +
+
+  # etiqueta principal
+
+  geom_text(
+    data = etiquetas_finales %>%
+      filter(delito == delito_principal),
+    aes(
+      x = 2024.9,
+      y = posicion_etiqueta,
+      label = delito
+    ),
+    color = "#2C5F7C",
+    fontface = "bold",
+    hjust = 0,
+    size = 4.1
+  ) +
+
+  # eje x
+
+  scale_x_continuous(
+    breaks = 2016:2024,
+    limits = c(2016, 2028)
+  ) +
+
+  # eje y
+
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(
+      mult = c(0.03, 0.08)
+    )
+  ) +
+
+  # títulos
+
+  labs(
+    title = "Evolución de los principales delitos de bajo impacto",
+    subtitle = paste0(
+      "Ciudad de México | 10 delitos con mayor número de carpetas, 2016-2024 | ",
+      "Delito destacado: ",
+      delito_principal
+    ),
+    x = "Año de inicio",
+    y = "Número de carpetas de investigación",
+    caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
+  ) +
+
+  # tema
+
+  theme_minimal(base_size = 14) +
+
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666",
+      margin = margin(b = 15)
+    ),
+
+    axis.text.x = element_text(
+      size = 11
+    ),
+
+    axis.text.y = element_text(
+      size = 10,
+      color = "#555555"
+    ),
+
+    axis.title = element_text(
+      size = 11
+    ),
+
+    legend.position = "none",
+
+    panel.grid.major.y = element_line(
+      color = "#E5E5E5",
+      linewidth = 0.4
+    ),
+
+    panel.grid.major.x = element_blank(),
+
+    panel.grid.minor = element_blank(),
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0,
+      margin = margin(t = 15)
+    ),
+
+    plot.margin = margin(
+      20,
+      80,
+      20,
+      20
+    )
+  )
+
+
+windows(width = 20,height = 10)
+print(grafico_temporal_bajo_impacto)
+
+```
+
+
+
+
 
 
 
