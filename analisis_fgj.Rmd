@@ -1,0 +1,522 @@
+---
+title: "Proyecto carpetas investigacion FGJ"
+author: "Pablo Nopala Abrin"
+date: "2026-09-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# CARPETAS DE INVESTIGACIÓN - FGJ CDMX
+# Acumulado 2016-2024
+
+# Instalar paquetes
+```{r setup, include=FALSE, eval=FALSE}
+#install.packages("httr")
+#install.packages("jsonlite")
+#install.packages("tidyverse")
+#install.packages("janitor")
+#install.packages("lubridate")
+#install.packages("skimr")
+#install.packages("leaflet")
+```
+
+# Cargar paquetes
+```{r}
+library(httr)
+library(jsonlite)
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(skimr)
+library(hms)
+```
+
+
+#  Conectar con la API de Datos Abiertos de CDMX
+```{r}
+url_conjunto <- paste0(
+  "https://datos.cdmx.gob.mx/api/3/action/package_show?id=",
+  "carpetas-de-investigacion-fgj-de-la-ciudad-de-mexico"
+)
+
+respuesta <- httr::GET(url_conjunto)
+
+```
+
+
+# Verificar que la conexión haya sido exitosa
+
+```{r}
+httr::stop_for_status(respuesta)
+```
+
+# Convertir la respuesta de la API a R
+```{r}
+informacion <- jsonlite::fromJSON(
+  httr::content(
+    respuesta,
+    "text",
+    encoding = "UTF-8"
+  )
+)
+```
+
+
+# Obtener la información de los recursos
+```{r}
+recursos <- informacion$result$resources
+```
+
+
+# Mostrar los recursos disponibles
+```{r}
+recursos[, c("name", "format", "id", "url")]
+```
+# Buscar el recurso Carpetas de Investigacion acumulado 2016-2024
+
+```{r}
+recurso_2016_2024 <- recursos[
+  grepl(
+    "acumulado 2016-2024",
+    recursos$name,
+    ignore.case = TRUE
+  ),
+]
+
+# Mostrar el resultado
+recurso_2016_2024[, c("name", "format", "id", "url")]
+```
+# Obtener la URL del CSV
+```{r}
+url_csv <- recurso_2016_2024$url[1]
+```
+
+# Leer datos
+```{r}
+datos <- readr::read_csv(
+  url_csv,
+  show_col_types = FALSE
+)
+```
+
+```{r}
+datos
+```
+
+```{r}
+glimpse(datos)
+```
+
+Vamos a cambiar el tipo de dato a algunas variables
+
+```{r}
+datos_limpios <- datos |> 
+  mutate(
+    anio_inicio = as.integer(anio_inicio),
+    anio_hecho = as.integer(anio_hecho),
+    hora_hecho = na_if(hora_hecho, "NaT:00"),
+    hora_inicio = as_hms(hora_inicio),
+    hora_hecho = as_hms(hora_hecho)
+  )
+```
+
+Algunos valores de las variables mes_anio y mes_hecho estan en ingles, asi que las vamos a modificar
+
+```{r}
+datos_limpios <- datos_limpios |>
+  mutate(
+    mes_hecho = case_match(
+      mes_hecho,
+      "February"  ~ "Febrero",
+      "March"     ~ "Marzo",
+      "April"     ~ "Abril",
+      "May"       ~ "Mayo",
+      "June"      ~ "Junio",
+      "July"      ~ "Julio",
+      "August"    ~ "Agosto",
+      .default    = mes_hecho # Conserva los datos que ya están en español o NA
+    ),
+    mes_inicio = case_match(
+      mes_inicio,
+      "February"  ~ "Febrero",
+      "March"     ~ "Marzo",
+      "April"     ~ "Abril",
+      "May"       ~ "Mayo",
+      "June"      ~ "Junio",
+      "July"      ~ "Julio",
+      "August"    ~ "Agosto",
+      .default    = mes_inicio
+    )
+  )
+```
+
+```{r}
+glimpse(datos_limpios)
+```
+
+```{r}
+colSums(is.na(datos_limpios))
+```
+
+```{r}
+sum(duplicated(datos_limpios))
+```
+
+Hay un total de 3833 carpetas repetidas. Que significa que hayan carpetas duplicadas?, hubo un delito que involucro varias victimas y estas realizaron la denuncia sobre el mismo?
+
+```{r}
+skim(datos_limpios)
+```
+
+Podemos notar que la variable alcaldia_catalogo esta practiamente llena de NA´s
+
+```{r}
+datos_limpios |> filter(!is.na(alcaldia_catalogo))
+```
+
+```{r}
+unique(datos_limpios$alcaldia_catalogo)
+```
+
+En alcaldia_catalogo solo tienen como valor "CDMX (indeterminada)", tal vez la podemos quitar esta columna pues parece no aportar información
+
+```{r}
+datos_limpios |> filter(alcaldia_hecho == "CDMX (indeterminada)")
+```
+
+```{r}
+unique(datos_limpios$municipio_hecho)
+```
+
+En la columna municipio_hecho solo esta el valor de CDMX, la podriamos quitar porque no aportar información.
+
+```{r}
+datos_limpios |> count(alcaldia_hecho, sort = TRUE)
+```
+
+```{r}
+datos_limpios |> filter(alcaldia_hecho == "nan")
+```
+
+Las carpetas que tienen como valor "nan" en alcaldia_hecho las juntarémos con las que tienen como valor "CDMX (indefinida)"
+
+```{r}
+datos_limpios <- datos_limpios |>
+  mutate(
+    alcaldia_hecho = if_else(
+      alcaldia_hecho == "nan",
+      "CDMX (indeterminada)",
+      alcaldia_hecho
+    )
+  )
+```
+
+```{r}
+datos_limpios |> count(alcaldia_hecho, sort = TRUE)
+```
+
+```{r}
+datos_limpios <- datos_limpios |> select(-c(municipio_hecho, alcaldia_catalogo))
+
+datos_limpios
+```
+
+--------------------------------------------------------------------------------
+
+# Analisis temporal
+
+```{r}
+datos_limpios |> count(anio_hecho, sort = TRUE)
+```
+
+Hay un valor extraño en anio_hecho: 222
+
+Error de registro? talvez era 2022, al ser un solo dato atípico tal vez lo podemos quitar
+
+```{r}
+datos_limpios |> filter(anio_hecho == 222)
+```
+
+También hay un caso extraño en que el año cuando sucedio el delito es mayor al año en que se inicia la carpeta
+
+```{r}
+datos_limpios |> filter(anio_hecho > anio_inicio)
+```
+
+Vamos a eliminar estos dos casos atípicos
+
+```{r}
+datos_limpios <- datos_limpios |>
+  filter(
+    fecha_hecho <= fecha_inicio,
+    anio_hecho != 222
+  )
+```
+
+```{r}
+datos_limpios |> mutate(diferencia = anio_inicio - anio_hecho) |> count(diferencia)
+```
+
+Con la tabla anterior podemos ver la diferencia de años entre cuando ocurrio el delito y cuando inicio la carpeta de investigación
+
+La gran mayoria de las carpetas se inician el mismo año en que ocurrio el delito
+
+```{r}
+# Esta visualización tal vez no aporta mucho, si tomamos una gran diferencia de años la grafica ya no es tan clara
+datos_limpios %>% 
+  mutate(diferencia = anio_inicio - anio_hecho) %>%
+  count(diferencia) %>%
+  ggplot(aes(x = diferencia, y = n)) +
+  geom_col(fill = "steelblue") +
+  coord_cartesian(xlim = c(0, 5)) +
+  labs(
+    title = "Diferencia entre el año del hecho y el año de inicio de la carpeta",
+    x = "Diferencia en años",
+    y = "Número de carpetas"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+datos_limpios |> filter(fecha_hecho > fecha_inicio)
+```
+
+Analizando las fechas completas podemos ver que hay 506 carpetas en que el hecho sucedió despues de que se iniciara la carpeta pero la diferencia es de horas o minutos
+
+```{r}
+# Visualización de las carpetas por año
+datos_limpios |> count(anio_hecho) |> ggplot(aes(anio_hecho,n)) + 
+  geom_col(fill="steelblue") +
+  coord_cartesian(xlim = c(2014, 2025)) +
+  labs(
+    title = "Delitos por años en CDMX",
+    x = "Años",
+    y = "Número de delitos"
+  )#la visualización solo muestra del 2014 al 2025 ya que al tomar más años no se ve bien
+
+# Tal vez para el estudio completo solo podriamos tomar del 2016 en adelante
+```
+
+Analizando la gráfica anterior podemos notar que desde el año 2016 al 2018 hubo un incremento en los registros de hechos delictivos y también hubo un pequeño descenso en los años 2019 y 2020, tal vez por pandemia. En general no se nota que haya un patron que nos de alguna información sobre si hay una relación entre los años que ocurren los delitos 
+
+--------------------------------------------------------------------------------
+
+# Analisis de delitos
+
+```{r}
+datos_limpios |> count(delito, sort = TRUE)
+```
+
+```{r}
+top_delitos <- datos_limpios |> 
+  count(delito, sort = TRUE) |> 
+  head(10)
+
+ggplot(top_delitos, aes(x = reorder(delito, n), y = n)) +
+  geom_col(fill = "#2b5c8f") +
+  coord_flip() +
+  labs(
+    title = "Top 10 de Delitos en CDMX",
+    x = NULL,
+    y = "Número de Carpetas"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+top_delitos <- datos_limpios |>
+  count(delito, sort = TRUE) |>
+  slice_head(n = 10) |>
+  pull(delito)
+
+datos_limpios |>
+  filter(delito %in% top_delitos) |>
+  count(anio_hecho, delito) |>
+  ggplot(aes(anio_hecho, n)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "steelblue", size = 2) +
+  facet_wrap(~ delito, scales = "free_y") +
+  scale_x_continuous(breaks = 2016:2025) +
+  coord_cartesian(xlim = c(2015, 2025)) + #la visualización solo muestra del 2015 al 2025
+  labs(
+    title = "Evolución temporal de los 10 delitos más frecuentes",
+    x = "Año",
+    y = "Número de carpetas"
+  ) +
+  theme_minimal()
+```
+Con estas gráficas podemos apreciar que los delitos de violencia familiar, amenazas y fraude han aumentado con el paso del tiempo, no parece que haya disminucion en delitos rtegistrados.
+
+En cambio delitos como robo a casa habitación sin violencia, robo a negocio sin violencia, robo a transeunte en via pública con violencia y robo de vehiculo de servicio particular sin violencia tuvieron grandes registros antes del 2019 y después de este año se aprecia una reducción considerable en el registro de estos delitos.
+
+Por otro lado, delitos como robo de accesorios de auto, robo de objetos y robo de objetos del interior de un vehiculo si presentan un aumento aproximadamenta hasta el 2018 y se aprecia un descenso en el registro de estos delitos mientras se acercan al 2020 y pasado este año de nuevo hay un aumento.   
+
+
+```{r}
+datos_limpios |> count(alcaldia_hecho, sort = TRUE)
+```
+
+```{r}
+datos_limpios |> count(alcaldia_hecho) |> 
+  ggplot(aes(reorder(alcaldia_hecho,n), n)) + 
+  geom_col() +
+  coord_flip() +
+  labs(title = "Carpetas por alcaldia",
+       x = "Alcaldia",
+       y = "Número de carpetas")
+```
+
+Vamos a ver como evolucionan la categorias de delitos por año
+
+```{r}
+datos_limpios |> count(anio_hecho, categoria_delito, sort = TRUE)
+```
+
+```{r}
+# No resulta muy buena la visualización de las categorias de delitos por año (mucha información en la gráfica)
+datos_limpios |> filter(between(anio_hecho, 2014, 2025)) |>
+  count(anio_hecho, categoria_delito) |>
+  ggplot(aes(anio_hecho, n,
+             color = categoria_delito)) +
+  geom_line() +
+  labs(
+    x = "Año",
+    y = "Número de carpetas",
+    color = "Categoría"
+  ) + 
+  theme_minimal()
+```
+
+Con esta gráfica podemos ver que la categoria de "Delito de bajo impacto" es la que más predomina.
+
+```{r}
+# Estas gráficas son las anteriores pero separadas
+datos_limpios |> filter(between(anio_hecho, 2014, 2025)) |>
+  count(anio_hecho, categoria_delito) |>
+  ggplot(aes(anio_hecho, n)) +
+  geom_line(color = "steelblue") +
+  facet_wrap(~categoria_delito) +
+  coord_cartesian(xlim = c(2014, 2025)) +
+  theme_minimal()
+```
+
+Durante el paso de los años, la categoria de delitos de bajo impacto es la que más se registró
+
+```{r}
+datos_limpios <- datos_limpios |>
+    mutate(anio = year(fecha_hecho),
+           mes = month(fecha_hecho,label = TRUE)
+           )
+```
+
+```{r}
+datos_limpios
+```
+
+```{r}
+datos_limpios |> count(mes_hecho, sort = TRUE)
+```
+
+Vamos a hacer un mapa de calor para ver si hay alguna relación entre los meses del año y las carpetas que se registran 
+
+```{r}
+datos_limpios |> filter(between(anio_hecho, 2014, 2025)) |>
+  count(anio_hecho, mes) |>
+  ggplot(aes(mes, factor(anio_hecho), fill = n)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  labs(
+    title = "Carpetas por meses",
+    x = NULL,
+    y = NULL,
+    fill = "Carpetas"
+  ) +
+  theme_minimal()
+```
+
+No se logra distinguir si hay algún patron que relacione los meses con la cantidad de carpetas que se registraron por año. Podriamos decir que en 2020 hubo un descenso de carpetas registradas durante los meses de abril, mayo y junio, esto probablemente se deba a la pandemia
+
+```{r}
+datos_limpios |> filter(between(anio_hecho, 2014, 2025)) |>
+  count(anio_hecho, alcaldia_hecho) |>
+  ggplot(aes(anio_hecho, n)) +
+  geom_line(color = "steelblue") +
+  facet_wrap(~alcaldia_hecho) +
+  labs(title = "Evolución de delitos por alcaldia",
+       x = "Años",
+       y = "Delitos") +
+  theme_minimal()
+```
+
+Con estas gráficas observamos que en varias alcaldias, del año 2016 al 2019, se observa un aumento de delitos ocurridos, y se aprecia una disminución durante el 2020. Después de este año parece que la cantidad de delitos se mantiene a un nivel "constante".
+
+También podemos destacar que en general las alcaldias de CUAJIMALPA DE MORELOS, XOCHIMILCO, LA MAGDALENA CONTRERAS y TLAHUAC tienen una menor cantidad de delitos registrados a lo largo de los años en comparación a las demas alcaldias.
+
+```{r}
+top_delitos <- datos_limpios |>
+  count(delito, sort = TRUE) |>
+  slice_head(n = 10) |>
+  pull(delito)
+
+datos_limpios |>
+  filter(delito %in% top_delitos) |>
+  count(alcaldia_hecho, delito) |>
+  ggplot(aes(x = reorder(alcaldia_hecho, n),
+             y = n,
+             fill = delito)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Delitos más frecuentes por alcaldía",
+    x = "Alcaldía",
+    y = "Número de carpetas",
+    fill = "Delito"
+  ) +
+  theme_minimal()
+```
+
+Podemos observar que en general el delito que más se presenta en las alcaldias es el de violencia familiar, seguido por el de fraude y amenazas
+
+--------------------------------------------------------------------------------
+
+# Conclusiones
+
+- ¿Existen patrones temporales en determinados delitos?
+
+No se logró apreciar algun patrón sobre algun delito en especifico, en general ocurren varios tipos de delitos a lo largo del tiempo
+
+- ¿Hay zonas que presenten concentraciones peculiares?
+
+No se aprecia que hayan consentraciones que puedan indicar algún fenomeno en especifico, en general el delito presente en todas las alcaldias es el de violencia familiar y en algunas hay un mayor registro que en otras pero esto puede deberse a la cantidad de habitantes de la alcaldia
+
+- ¿Han cambiado determinados delitos a travez del tiempo?
+
+Si se puede observar un cambio en ciertos delitos con el paso del tiempo, por ejemplo los delitos robo de accesorios de auto, robo de objetos y robo de objetos del interior de un vehiculo presentan una reducción de registros a medira que se acercan al año 2020 y después vuelve a aumentar. Mientras que delitos como robo a casa habitación sin violencia, robo a negocio sin violencia, robo a transeunte en via pública con violencia y robo de vehiculo de servicio particular sin violencia iban en aumento hasta aproximadamente el 2019 y después de este año comenzaron a dirminuir los registros de estos delitos conforme transcurrian los años, en estos casos ya no hubo un aumento después de que comenzaron a disminuir.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
