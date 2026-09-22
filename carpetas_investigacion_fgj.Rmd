@@ -11,13 +11,6 @@ knitr::opts_chunk$set(echo = TRUE)
 # CARPETAS DE INVESTIGACIÃ“N - FGJ CDMX
 # Acumulado 2016-2024
 
-# Instalar paquetes
-```{r setup, include=FALSE, eval=FALSE}
-install.packages("httr")
-install.packages("jsonlite")
-install.packages("tidyverse")
-```
-
 # Cargar paquetes
 ```{r}
 library(httr)
@@ -26,6 +19,9 @@ library(tidyverse)
 library(hms)
 library(scales)
 library(ggrepel)
+library(sf)
+library(stringi)
+library(patchwork)
 ```
 
 
@@ -231,7 +227,7 @@ datos_filtrados <- datos %>%
 ```
 
 # AnÃ¡lisis principal, categoria_delito
-```{r}
+```{r Distribución de carpetas de investigación por categoría delictiva}
 
 
 tabla_categorias <- datos_filtrados %>%
@@ -309,7 +305,7 @@ print(grafico_categorias)
 
 #Ya que vimos que la mayor parte de los delitos corresponden a delitos de bajo impacto, ahora enfatizaremos en los delitos pertenecientes a esta categoria
 
-```{r}
+```{r Distribución de delitos clasificados como de bajo impacto}
 bajo_impacto <- datos_filtrados %>%
   filter(categoria_delito == "Delito de bajo impacto") %>%
   count(delito, sort = TRUE) %>%
@@ -351,7 +347,7 @@ grafico_bajo_impacto <- ggplot(
   ) +
   labs(
     title = "Distribución de delitos clasificados como de bajo impacto",
-    subtitle = "Ciudad de México | 20 delitos con mayor número de carpetas de investigación",
+    subtitle = "Ciudad de México | Delitos con mayor número de carpetas de investigación | 2016-2024",
     x = NULL,
     y = "Número de carpetas de investigación",
     caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
@@ -385,8 +381,8 @@ grafico_bajo_impacto <- ggplot(
 print(grafico_bajo_impacto)
 ```
 #Veamos la evolución de los diferentes delitos a lo largo del tiempo
-```{r}
-#Todos los delitos
+```{r Evolución de carpetas de investigación por categoría delictiva}
+# Contar carpetas por año y categoría
 temporal_categoria <- datos_filtrados %>%
   filter(
     anio_inicio >= 2016,
@@ -395,34 +391,51 @@ temporal_categoria <- datos_filtrados %>%
   ) %>%
   count(anio_inicio, categoria_delito)
 
-#Delito con mayor número de carpetas
-categoria_principal <- temporal_categoria %>%
+# Obtener las 10 categorías con más carpetas en todo el periodo
+top_10_categorias <- temporal_categoria %>%
   group_by(categoria_delito) %>%
   summarise(
     total = sum(n),
     .groups = "drop"
   ) %>%
-  slice_max(total, n = 1) %>%
+  slice_max(
+    order_by = total,
+    n = 10,
+    with_ties = FALSE
+  )
+
+# Filtrar únicamente el top 10
+temporal_categoria <- temporal_categoria %>%
+  filter(categoria_delito %in% top_10_categorias$categoria_delito)
+
+# Obtener la categoría con mayor número de carpetas
+categoria_principal <- top_10_categorias %>%
+  slice_max(
+    order_by = total,
+    n = 1,
+    with_ties = FALSE
+  ) %>%
   pull(categoria_delito)
+
 # Obtener valores de 2024
 etiquetas_2024 <- temporal_categoria %>%
   filter(anio_inicio == 2024) %>%
   arrange(desc(n))
 
 # Crear posiciones ordenadas para las etiquetas
-# Se distribuyen verticalmente en el lado derecho
 etiquetas_2024 <- etiquetas_2024 %>%
   mutate(
     posicion_etiqueta = seq(
       from = max(temporal_categoria$n) * 0.95,
-      to   = max(temporal_categoria$n) * 0.05,
+      to = max(temporal_categoria$n) * 0.05,
       length.out = n()
     )
   )
 
+# Crear gráfico
 grafico_temporal_categorias <- ggplot() +
 
-  # Líneas de todas las categorías
+  # Líneas de las categorías
   geom_line(
     data = temporal_categoria,
     aes(
@@ -435,7 +448,7 @@ grafico_temporal_categorias <- ggplot() +
     alpha = 0.7
   ) +
 
-  # Puntos de todas las categorías
+  # Puntos de las categorías
   geom_point(
     data = temporal_categoria,
     aes(
@@ -509,10 +522,8 @@ grafico_temporal_categorias <- ggplot() +
   ) +
 
   labs(
-    title = "Evolución de las carpetas de investigación por categoría delictiva",
-    subtitle = paste0(
-      "Ciudad de México | 2016-2024"
-    ),
+    title = "Evolución de carpetas de investigación por categoría delictiva",
+    subtitle = "Categorías con mayor número de carpetas | Ciudad de México | 2016-2024",
     x = "Año de inicio",
     y = "Número de carpetas de investigación",
     caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
@@ -572,7 +583,7 @@ print(grafico_temporal_categorias)
 ```
 
 # Ahora analizaremos los delitos pertenecientes a delitos de bajo impacto y su evolución a lo largo del tiempo
-```{r}
+```{r Evolución de los principales delitos de bajo impacto}
 # top 10
 
 top10_delitos <- datos_filtrados %>%
@@ -766,11 +777,7 @@ grafico_temporal_bajo_impacto <- ggplot() +
 
   labs(
     title = "Evolución de los principales delitos de bajo impacto",
-    subtitle = paste0(
-      "Ciudad de México | 10 delitos con mayor número de carpetas, 2016-2024 | ",
-      "Delito destacado: ",
-      delito_principal
-    ),
+    subtitle = paste0("Ciudad de México | Delitos con mayor número de carpetas | 2016-2024"),
     x = "Año de inicio",
     y = "Número de carpetas de investigación",
     caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
@@ -836,6 +843,159 @@ windows(width = 20,height = 10)
 print(grafico_temporal_bajo_impacto)
 
 ```
+# Analizaremos el numero de carpetas delictivas por alcaldia, pero primero vamos a estandarizar el nombre de las alcaldias para después hacer join con el archivo shp obtenido de datos cdmx
+```{r Estandarizar alcaldias}
+# Preparar nombres del shapefile
+nombres_alcaldias <- mapa_alcaldias %>%
+  st_drop_geometry() %>%
+  transmute(
+    alcaldia_join = NOMGEO %>%
+      str_to_upper() %>%
+      stri_trans_general("Latin-ASCII") %>%
+      str_squish(),
+    alcaldia_hecho = NOMGEO
+  )
+
+# Distribución por alcaldía
+distribucion_alcaldias <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2024,
+    !is.na(alcaldia_hecho),
+    !alcaldia_hecho %in% c(
+      "NaN",
+      "Nan",
+      "Cdmx (indeterminada)"
+    )
+  ) %>%
+  mutate(
+    alcaldia_join = alcaldia_hecho %>%
+      str_to_upper() %>%
+      stri_trans_general("Latin-ASCII") %>%
+      str_squish()
+  ) %>%
+  count(
+    alcaldia_join,
+    name = "carpetas"
+  ) %>%
+  left_join(
+    nombres_alcaldias,
+    by = "alcaldia_join"
+  ) %>%
+  select(
+    alcaldia_hecho,
+    carpetas
+  ) %>%
+  arrange(desc(carpetas))
+
+mapa_carpetas <- mapa_alcaldias %>%
+  left_join(
+    distribucion_alcaldias,
+    by = c("NOMGEO" = "alcaldia_hecho")
+  )
+```
+
+# Mapa del número de carpetas de investigación por alcaldia
+```{r Distribución de carpetas de investigación por alcaldía}
+# Crear posiciones para las etiquetas
+etiquetas_alcaldias <- mapa_carpetas %>%
+  st_point_on_surface() %>%
+  cbind(st_coordinates(.)) %>%
+  mutate(
+    etiqueta = case_when(
+      NOMGEO == "Gustavo A. Madero" ~ "Gustavo A.\nMadero",
+      NOMGEO == "Venustiano Carranza" ~ "Venustiano\nCarranza",
+      NOMGEO == "La Magdalena Contreras" ~ "La Magdalena\nContreras",
+      NOMGEO == "Cuajimalpa de Morelos" ~ "Cuajimalpa\nde Morelos",
+      NOMGEO == "Álvaro Obregón" ~ "Álvaro\nObregón",
+      TRUE ~ NOMGEO
+    )
+  )
+
+# Crear mapa
+grafico_mapa_alcaldias <- ggplot(mapa_carpetas) +
+
+  geom_sf(
+    aes(fill = carpetas),
+    color = "white",
+    linewidth = 0.6
+  ) +
+
+  geom_text_repel(
+    data = etiquetas_alcaldias,
+    aes(
+      x = X,
+      y = Y,
+      label = etiqueta
+    ),
+    size = 3.2,
+    color = "#444444",
+    fontface = "bold",
+    lineheight = 0.9,
+    box.padding = 0.5,
+    point.padding = 0.3,
+    min.segment.length = 0,
+    segment.color = "#888888",
+    segment.linewidth = 0.3,
+    max.overlaps = Inf,
+    seed = 123
+  ) +
+
+  scale_fill_gradient(
+    low = "#DCE4E8",
+    high = "#2C5F7C",
+    labels = scales::label_comma(),
+    name = "Carpetas de\ninvestigación"
+  ) +
+
+  labs(
+    title = "Distribución de carpetas de investigación por alcaldía",
+    subtitle = "Ciudad de México | 2016-2024",
+    caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
+  ) +
+
+  theme_void(base_size = 14) +
+
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666",
+      margin = margin(b = 15)
+    ),
+
+    legend.title = element_text(
+      size = 10
+    ),
+
+    legend.text = element_text(
+      size = 9
+    ),
+
+    legend.position = "right",
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0,
+      margin = margin(t = 15)
+    ),
+
+    plot.margin = margin(
+      20, 40, 20, 40
+    )
+  )
+
+windows(width = 17, height = 12)
+
+print(grafico_mapa_alcaldias)
+```
+
+
 
 
 
