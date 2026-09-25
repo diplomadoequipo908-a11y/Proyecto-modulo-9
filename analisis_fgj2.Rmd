@@ -1,0 +1,458 @@
+---
+title: "Análisis delictivo con carpetas de investigación en CDMX"
+subtitle: "Patrones Delictivos Mensuales - FGJ CDMX 2016-2024"
+authors: 
+    - Anay Becerra Ayala 
+    - Bruno Díaz Cuevas
+    - Pablo Emilio Nopala Abrin
+    - Brandon Patiño González
+    - Enrique Olvera Galeana
+    - David Suárez Lopez
+date: "Today"
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-location: right
+    toc-title: "Contenido"
+    code-fold: false
+    code-tools: false
+    page-layout: full
+    css: estilos.css
+    title-block-banner: true
+    title-block-banner-color: "#dbeafe"
+editor: visual
+---
+
+```{r setup1, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message= FALSE, warning=FALSE, results="asis")
+```
+
+```{r setup2, include=FALSE, eval=FALSE}
+install.packages("httr")
+install.packages("jsonlite")
+install.packages("tidyverse")
+install.packages("janitor")
+install.packages("lubridate")
+install.packages("skimr")
+install.packages("leaflet")
+```
+
+```{r}
+library(httr)
+library(jsonlite)
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(skimr)
+library(hms)
+```
+
+# Resumen
+
+En este reporte se buscó definir si había patrones criminales relacionados con la mensualidad del reporte de crímenes en las carpetas de investigación que sube la Fiscalía de Justicia de la Ciudad de México, siendo carpetas de investigación acumulada dentro de los años $2016$ al $2024$. En este reporto se usó el método de clustering, para visualizar cómo incidían los crímenes con su relación mensual. Se analizó de forma geográfica usando un mapa de la Ciudad de México por Sectores, ya que esto podría aportar más información del lugar de ocurrencia de los delitos.
+
+# Introducción
+
+A lo largo de la historia de la Ciudad de México, ésta ha tenido historia de una alta incidencia criminal. Sin embargo el esfuerzo de las autoridades competentes de justicia ha observado y clasificado patrones de delitos conforme ha habido una evolución en la legislación de la Ciudad de México (CdMx). Es decir, ahora se documentan feminicidios, crímenes de de violencia familiar, extorsión y hasta el robo de identidad. Sin embargo, a pesar de la modificación de la legislación, los crímenes siguen presentes, aunque hay crímenes que han reducido en cantidad en la CdMx como se muestra a continuación. El análisis se hace a través de una base de datos pública por parte de la Fiscalía de Justicia de la Ciudad de México (FJCdMx). En esta tenemos crímenes de la CdMx desde el año $2016$ al $2024$. Por ende, dada a la extensa información de la base de datos, se busca poder relacionar los padtrones de crímenes con la mensualidad, para ver si existe relación con algún mes que favorezca la alta incidencia criminal; desde crímenes en meses con más festividades, vacaciones, pagos de quincenas y mensualidades o el inicio de actividades escolares. Por ende, las preguntas que nos queda hacer es, ¿Existe alguna relación con la incidencia criminal y el período del año? ¿Ha reducido la incidencia criminal desde el año $2016$ al año $2024$? ¿Cuáles son los crímenes más frecuentes desde este registro?¿Cuáles delegaciones son las más y menos afectadas?
+
+# Análisis de Datos de las Carpetas
+
+## Análisis cualitativo de las Carpetas
+
+```{r leer_datos, cache=TRUE}
+library(data.table)
+#ruta del .csv
+ruta <- "/home/pauldirac13/Documentos/pro8/carpetasFGJ_acumulado_2025_01.csv"
+#head(ruta)
+```
+
+```{r leer_datos1, cache=TRUE}
+library(data.table)
+#ruta del .csv
+carpetas <- fread("carpetasFGJ_acumulado_2025_01.csv", encoding= "Latin-1")
+#head(carpetas)
+#nrow(carpetas)
+
+```
+
+Aquí veremos la información que contiene la tabla de carpetas de investigación acumuladas de FGJ en CdMx del año 2016 al 2024 de los hechos delictivos en la CdMx:
+
+```{r}
+#| echo: false
+#unique(carpetas$categoria_delito) %>% table()
+#sort(unique(carpetas$categoria_delito))
+```
+
+```{r ver_tabla2}
+library(knitr)
+library(kableExtra)
+
+#dimensión
+#data.frame(
+#  Filas = nrow(carpetas),
+#  Columnas = ncol(carpetas)
+#) %>% kable() %>% kable_styling(full_width = F, bootstrap_options = "striped")
+
+#nombres de columnas
+#data.frame(Columna = names(carpetas)) %>% 
+#  kable() %>% kable_styling(full_width = F)
+
+#primeras 4 filas / solo 4 columnas 
+#head(carpetas[,1:6], 4) %>% 
+#  kable() %>% kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = T) %>%
+#  scroll_box(width = "100%")
+```
+
+```{r tabla_1}
+library(knitr)
+library(kableExtra)
+
+data.frame(
+  Concepto = c("Filas (carpetas)", "Columnas (variables)"),
+  Total = c(nrow(carpetas), ncol(carpetas))
+) %>% 
+  kable(caption = "Tabla1: Dimensión de la base") %>%
+  kable_styling(full_width = F, bootstrap_options = c("striped","hover")) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, background = "#dbeafe")
+```
+
+```{r}
+data.frame(
+  No = 1:length(names(carpetas)),
+  Columna = names(carpetas)
+) %>% 
+  kable(caption = "Tabla2: Variables en la base") %>%
+  kable_styling(full_width = F, bootstrap_options = c("striped","hover")) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(2, bold = TRUE)
+
+head(carpetas[,1:6], 4) %>% 
+  kable(caption = "Tabla 3: Primeras 4 filas (6 columnas clave)") %>% 
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = T, font_size = 11) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  scroll_box(width = "100%")
+```
+
+
+
+De nuestra base de datos tenemos $21$ columnas y $2,098,743$ renglones, a continuación mostramos de nuestra base de datos un diccionario por cada elemento de las columnas:
+
+```{r diccionario}
+library(knitr)
+library(kableExtra)
+
+diccionario <- data.frame(
+  Columna = c("anio_inicio", "mes_inicio", "fecha_inicio", "hora_inicio",
+              "anio_hecho", "mes_hecho", "fecha_hecho", "hora_hecho",
+              "delito", "categoria_delito", "competencia", "fiscalia",
+              "agencia", "unidad_investigacion", "colonia_hecho", "colonia_catalogo",
+              "alcaldia_hecho", "alcaldia_catalogo", "municipio_hecho", "latitud", "longitud"),
+  Descripcion = c("Año en que inicia la carpeta",
+                  "Mes en que inicia la carpeta",
+                  "Fecha de inicio de la carpeta",
+                  "Hora de inicio de la carpeta",
+                  "Año en que ocurrió el hecho",
+                  "Mes en que ocurrió el hecho",
+                  "Fecha del hecho delictivo",
+                  "Hora del hecho delictivo",
+                  "Tipo de delito específico",
+                  "Clasificación: bajo impacto, alto impacto, etc",
+                  "Fuero común es delito local; Hecho no delictivo es denuncia que al final no fue delito; Incomptencia es que FGJ no es competente y lo turna; Vacío es que no tiene valor",
+                  "Fiscalía donde se levanta",
+                  "Agencia del MP",
+                  "Unidad de investigación",
+                  "Colonia donde ocurrió (reportada)",
+                  "Colonia homologada del catálogo",
+                  "Alcaldía donde ocurrió (reportada)",
+                  "Alcaldía homologada",
+                  "Municipio si es fuera de CDMX",
+                  "Coordenada latitud del hecho",
+                  "Coordenada longitud del hecho"),
+  Tipo = c(rep("Temporal", 8), rep("Delito", 3), rep("Ubicación/Administrativo", 8), rep("Georreferenciación", 2))
+)
+
+kable(diccionario, caption = "Tabla 4. Diccionario de datos FGJ CDMX 2016-2024") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F, position = "left", font_size = 13) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, background = "#dbeafe") %>%
+  collapse_rows(columns = 3, valign = "middle")
+```
+
+## Análisis Cuantitativos de las Carpetas
+
+Por otro lado, nos interesa ver el tipo de delito, la categoría de delito y las delegaciones que considera la base de datos de las FGJCdMx como se muestra a continuación:
+
+```{r}
+#carpetas por alcaldía
+carpetas %>% 
+  filter(!is.na(alcaldia_hecho), 
+         alcaldia_hecho != "", 
+         alcaldia_hecho != "NO ESPECIFICADO") %>% 
+  count(alcaldia_hecho, sort = TRUE) %>%
+  mutate(porcentaje = round(n / sum(n) * 100, 1)) %>%
+  kable(col.names = c("Alcaldía", "N carpetas", "%"),
+        caption = "Tabla 5: Carpetas por alcaldía") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = F) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, background = "#dbeafe")
+```
+
+
+A continuación veremos los NA-s de cada columna y se hace limpieza de los datos contenidos en la tabla de carpetas de investigación:
+
+```{r}
+library(knitr)
+library(kableExtra)
+library(dplyr)
+
+data.frame(
+  Variable = names(carpetas),
+  N_NA = colSums(is.na(carpetas)),
+  Porcentaje_NA = round(colSums(is.na(carpetas)) / nrow(carpetas) * 100, 2)
+) %>%
+  filter(N_NA > 0) %>%  # solo muestra las que sí tienen NA-s
+  arrange(desc(N_NA)) %>%
+  kable(caption = "Tabla 6: Valores faltantes por variable", 
+        col.names = c("Variable", "N de NAs", "% de NAs")) %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = F) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, background = "#dbeafe")
+```
+
+Vemos que hay más NA en latitud y en longitud en nuestra base de datos. Al igual que en el año y fecha de los hechos, discrepando entre ambas con un valor.
+
+Lo que nos dice que no es bueno tomar las coordenadas como georreferencia, ya que implica un $4.8\%$ de faltantes y deseamos tener más acceso a datos.
+
+```{r}
+carpetas_limpias <- carpetas |>
+  mutate(
+    # años a número
+    anio_inicio = as.integer(anio_inicio),
+    anio_hecho = as.integer(anio_hecho),
+    
+    # fechas a Date
+    fecha_inicio = as.Date(fecha_inicio),
+    fecha_hecho = as.Date(fecha_hecho),
+    
+    # horas: primero quita basura y luego convierte
+    hora_inicio = trimws(hora_inicio),
+    hora_inicio = na_if(hora_inicio, ""),
+    hora_inicio = na_if(hora_inicio, "NaT:00"),
+    hora_inicio = parse_hms(hora_inicio), # parse_hms no truena como as_hms
+    
+    hora_hecho = trimws(hora_hecho),
+    hora_hecho = na_if(hora_hecho, ""),
+    hora_hecho = na_if(hora_hecho, "NaT:00"),
+    hora_hecho = parse_hms(hora_hecho),
+    
+    # texto a minúsculas sin acentos para que no se duplique
+    delito = tolower(delito),
+    alcaldia_hecho = tolower(alcaldia_hecho)
+  ) |>
+  # quita filas sin coordenadas 
+  filter(!is.na(latitud) & !is.na(longitud))
+```
+
+```{r}
+data.frame(
+  variable = names(colSums(is.na(carpetas_limpias))),
+  n_NA = colSums(is.na(carpetas_limpias))
+) %>%
+  filter(n_NA > 0) %>%
+  kable(caption = "Tabla 7: Variables con valores faltantes") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = F) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, background = "#dbeafe")
+
+# si ya está todo limpio y no hay NA-s, se usa para que ponga 0
+data.frame(
+  variable = names(colSums(is.na(carpetas_limpias))),
+  n_NA = colSums(is.na(carpetas_limpias))
+) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = F) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE)
+```
+
+```{r}
+data.frame(
+  Concepto = c("Filas (carpetas)", "Columnas (variables)"),
+  Total = c(nrow(carpetas_limpias), ncol(carpetas_limpias))
+) %>%
+  kable(caption = "Tabla 8: Dimensión de la base limpia") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = F) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, background = "#dbeafe")
+```
+
+
+Se quitaron los NA-s en georreferencia, ya que no siempre se sabe con exactitud el lugar del delito, sin embargo, para un análisis por delegaciones, asociaremos por delegación las coordenadas geográfica del la alcaldía donde sucedió el hecho dado sus centros geográfico.
+
+```{r}
+#carpetas por alcaldía
+carpetas_limpias %>% 
+  mutate(alcaldia_hecho = tolower(alcaldia_hecho)) %>% 
+  filter(!is.na(alcaldia_hecho), 
+         alcaldia_hecho != "", 
+         alcaldia_hecho != "no especificado",
+         alcaldia_hecho != "nan",
+         alcaldia_hecho != "cdmx (indeterminada)") %>% 
+  count(alcaldia_hecho, sort = TRUE) %>%
+  mutate(porcentaje = round(n / sum(n) * 100, 1)) %>%
+  adorn_totals("row", fill = "-", name = "TOTAL") %>%
+  mutate(porcentaje = ifelse(alcaldia_hecho == "TOTAL", 100, porcentaje)) %>%
+  kable(col.names = c("Alcaldía", "N carpetas", "%"),
+        caption = "Tabla 9: Carpetas por alcaldía (limpia)") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = F) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = TRUE) %>%
+  column_spec(1, bold = TRUE, background = "#dbeafe") %>%
+  row_spec(17, background = "#1a1a2e", color = "white", bold = TRUE) # la fila 17 es el TOTAL
+```
+
+```{r tabla_cat_del}
+#categoría del delito
+carpetas_limpias %>% 
+  filter(categoria_delito != "") %>%
+  count(categoria_delito, sort = TRUE) %>%
+  mutate(porcentaje = round(n / nrow(carpetas) * 100, 2)) %>%
+  kable(col.names = c("Categoría del delito", "N carpetas", "%"),
+        caption = "Tabla 10: Categorías de delito") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = F) %>%
+  row_spec(0, background = "#1a1a2e", color = "white", bold = T) %>%
+  column_spec(1, background = "#dbeafe", bold = T)
+```
+
+```{r}
+#aquí solo asociamos el vector de coordenadas para cada centro de la delegación donde ocurrió el delito
+centros <- data.frame(
+  alcaldia_hecho = c("alvaro obregon","azcapotzalco","benito juarez","coyoacan","cuajimalpa de morelos","cuauhtemoc","gustavo a. madero","iztacalco","iztapalapa","la magdalena contreras","miguel hidalgo","milpa alta","tlahuac","tlalpan","venustiano carranza","xochimilco"),
+  latitud2 = c(19.357,19.480,19.385,19.346,19.365,19.441,19.493,19.395,19.359,19.326,19.408,19.191,19.270,19.292,19.428,19.260),
+  longitud2 = c(-99.203,-99.185,-99.158,-99.162,-99.297,-99.146,-99.110,-99.096,-99.092,-99.213,-99.185,-99.023,-99.006,-99.171,-99.112,-99.105)
+)
+```
+
+```{r}
+#aquí hacemos un left join a la tabla de carpetas para adicionar la tabla centros
+carpetas_geo <- carpetas_limpias |>
+  mutate(alcaldia_hecho = tolower(trimws(alcaldia_hecho))) |>
+  left_join(centros, by = "alcaldia_hecho")
+
+# nueva latitud final: si tiene la original la usa, si no, usa la de la alcaldía
+carpetas_geo <- carpetas_geo |>
+  mutate(
+    lat_final = ifelse(is.na(latitud), latitud2, latitud),
+    lon_final = ifelse(is.na(longitud), longitud2, longitud)
+  )
+
+```
+
+Ahora se hace el mapeo de los datos:
+
+```{r}
+#gráfica de hechos delictivos por delegación
+carpetas_geo |>
+  filter(!is.na(alcaldia_hecho),
+         tolower(alcaldia_hecho) != "nan",
+         alcaldia_hecho != "",
+         tolower(alcaldia_hecho) != "no especificado") |>
+  count(alcaldia_hecho, sort = TRUE) |>
+  ggplot(aes(x = reorder(alcaldia_hecho, n), y = n)) +
+  geom_col(fill = "blue") + 
+  coord_flip() +
+  labs(x = "Alcaldía del hecho", y = "No. carpetas",
+       title = "Carpetas por alcaldía") +
+  theme_minimal()
+```
+
+Si queremos ver los delitos por delegación como un mapa de calor de georreferencia, se tiene que:
+
+```{r}
+library(sf)
+library(dplyr)
+
+cdmx <- st_read(
+  "https://raw.githubusercontent.com/RodrigoArturoFG/cdmx-verde/main/data/alcaldias/alcaldias_cdmx.geojson",
+  quiet = TRUE
+) %>% st_transform(4326)
+
+print(cdmx)
+names(cdmx)
+plot(cdmx$geometry)
+```
+
+```{r}
+#mapa cdmx dado un url
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# fronteras oficiales INEGI
+cdmx <- st_read(
+  "https://raw.githubusercontent.com/RodrigoArturoFG/cdmx-verde/main/data/alcaldias/alcaldias_cdmx.geojson",
+  quiet = TRUE
+) %>% st_transform(4326)
+
+#numerar alcaldías 1a 16
+cdmx_num <- cdmx %>%
+  arrange(CVE_MUN) %>%
+  mutate(
+    num = row_number(),
+    etiqueta = paste0(num, ": ", alcaldia)
+  )
+
+#tabla del reporte
+print(cdmx_num %>% st_drop_geometry() %>% select(num, alcaldia))
+
+# mapa de azul y rojo
+mapa_pro <- carpetas_geo %>%
+  filter(!is.na(latitud), !is.na(longitud),
+         longitud > -99.4 & longitud < -98.9,
+         latitud > 19.1 & latitud < 19.7) %>%
+  ggplot() +
+  geom_hex(aes(x = longitud, y = latitud), bins = 130) +
+  # paleta azul y rojo
+  scale_fill_gradientn(
+    colours = c("#0d0887", "#5c02a3", "#9c179e", "#ed7953", "#f0f921", "#FF0000"),
+    trans = "log10",
+    breaks = c(1,10,100,1000,5000),
+    labels = c("1","10","100","1k","5k"),
+    name = "N delitos"
+  ) +
+  geom_sf(data = cdmx_num, fill = NA, color = "black", 
+          linewidth = 0.8, inherit.aes = FALSE) +
+  geom_sf_text(data = cdmx_num, aes(label = num), 
+               color = "black", size = 5, fontface = "bold",
+               # contornito negro para lectura
+               family = "sans") +
+  coord_sf(xlim = c(-99.33, -98.93), ylim = c(19.15, 19.62)) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face="bold", size=14, hjust=0.5),
+    plot.subtitle = element_text(size=10, hjust=0.5),
+    plot.caption = element_text(size=6, hjust=0.5),
+    legend.position = "right"
+  ) +
+  labs(title = "Densidad de carpetas FGJ CDMX con límites oficiales INEGI",
+       subtitle = "n = 1.9M | Azul = baja densidad, Rojo = alta densidad",
+       caption = paste0(cdmx_num$etiqueta, collapse = " | "))
+
+mapa_pro
+
+ggsave("mapa_final_pro8_AZUL_ROJO.png", plot = mapa_pro, width = 10, height = 8, dpi = 400)
+```
+
+Como vemos en el mapa, todas las delegaciones tienen muchos delitos, pero no nos arroja mucha información de cuáles son las que tengan tanta incidencia. Por ende, nos valdremos de la intensidad que Cuathémoc, Benito Juárez e Iztapalapa. Sin embargo, por la gráfica de barras vemos que la delegación Gustavo A. Madero también sufre de alta incidencia delictiva.
+
+# Análisis Básico
+
+El mapa anterior fue para mostrar información general de que delegación sufría más delitos, sin importar el tipo de delito. Ahora, veremos el delito por delegación y la categoría de este:
+
+```{r}
+install.packages("purrr")
+```
+
+# Resultados
+
+# Conclusiones
