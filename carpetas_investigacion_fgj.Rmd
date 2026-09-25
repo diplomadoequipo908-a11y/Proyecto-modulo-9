@@ -347,7 +347,7 @@ grafico_bajo_impacto <- ggplot(
   ) +
   labs(
     title = "Distribución de delitos clasificados como de bajo impacto",
-    subtitle = "Ciudad de México | Delitos con mayor número de carpetas de investigación | 2016-2024",
+    subtitle = "Ciudad de México | Delitos con mayor número de carpetas de investigación | 2016-2025",
     x = NULL,
     y = "Número de carpetas de investigación",
     caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
@@ -382,18 +382,31 @@ print(grafico_bajo_impacto)
 ```
 #Veamos la evolución de los diferentes delitos a lo largo del tiempo
 ```{r Evolución de carpetas de investigación por categoría delictiva}
-# Contar carpetas por año y categoría
+
+# contar carpetas por año y categoría
+
 temporal_categoria <- datos_filtrados %>%
   filter(
     anio_inicio >= 2016,
-    anio_inicio <= 2024,
+    anio_inicio <= 2025,
     !is.na(categoria_delito)
   ) %>%
-  count(anio_inicio, categoria_delito)
+  count(
+    anio_inicio,
+    categoria_delito
+  )
 
-# Obtener las 10 categorías con más carpetas en todo el periodo
+
+# obtener las 10 categorías con más carpetas
+# se utilizan únicamente los años completos 2016-2024
+
 top_10_categorias <- temporal_categoria %>%
-  group_by(categoria_delito) %>%
+  filter(
+    anio_inicio <= 2024
+  ) %>%
+  group_by(
+    categoria_delito
+  ) %>%
   summarise(
     total = sum(n),
     .groups = "drop"
@@ -404,267 +417,96 @@ top_10_categorias <- temporal_categoria %>%
     with_ties = FALSE
   )
 
-# Filtrar únicamente el top 10
-temporal_categoria <- temporal_categoria %>%
-  filter(categoria_delito %in% top_10_categorias$categoria_delito)
 
-# Obtener la categoría con mayor número de carpetas
+# filtrar únicamente el top 10
+
+temporal_categoria <- temporal_categoria %>%
+  filter(
+    categoria_delito %in% top_10_categorias$categoria_delito
+  )
+
+
+# obtener la categoría con mayor número de carpetas
+
 categoria_principal <- top_10_categorias %>%
   slice_max(
     order_by = total,
     n = 1,
     with_ties = FALSE
   ) %>%
-  pull(categoria_delito)
+  pull(
+    categoria_delito
+  )
 
-# Obtener valores de 2024
+
+# obtener valores de 2024 para las etiquetas
+
 etiquetas_2024 <- temporal_categoria %>%
-  filter(anio_inicio == 2024) %>%
-  arrange(desc(n))
+  filter(
+    anio_inicio == 2024
+  ) %>%
+  arrange(
+    desc(n)
+  )
 
-# Crear posiciones ordenadas para las etiquetas
+
+# obtener valor máximo para distribuir las etiquetas
+
+max_y <- max(
+  temporal_categoria$n,
+  na.rm = TRUE
+)
+
+
+# crear posiciones ordenadas para las etiquetas
+
 etiquetas_2024 <- etiquetas_2024 %>%
   mutate(
+
     posicion_etiqueta = seq(
-      from = max(temporal_categoria$n) * 0.95,
-      to = max(temporal_categoria$n) * 0.05,
+      from = max_y * 0.98,
+      to = max_y * 0.12,
       length.out = n()
+    ),
+
+    etiqueta = stringr::str_wrap(
+      categoria_delito,
+      width = 35
     )
   )
 
-# Crear gráfico
+
+# crear gráfico
+
 grafico_temporal_categorias <- ggplot() +
-
-  # Líneas de las categorías
-  geom_line(
-    data = temporal_categoria,
-    aes(
-      x = anio_inicio,
-      y = n,
-      group = categoria_delito
-    ),
-    color = "#A8B8C2",
-    linewidth = 0.8,
-    alpha = 0.7
-  ) +
-
-  # Puntos de las categorías
-  geom_point(
-    data = temporal_categoria,
-    aes(
-      x = anio_inicio,
-      y = n,
-      group = categoria_delito
-    ),
-    color = "#A8B8C2",
-    size = 2,
-    alpha = 0.7
-  ) +
-
-  # Línea de la categoría principal
-  geom_line(
-    data = temporal_categoria %>%
-      filter(categoria_delito == categoria_principal),
-    aes(
-      x = anio_inicio,
-      y = n
-    ),
-    color = "#2C5F7C",
-    linewidth = 1.5
-  ) +
-
-  # Puntos de la categoría principal
-  geom_point(
-    data = temporal_categoria %>%
-      filter(categoria_delito == categoria_principal),
-    aes(
-      x = anio_inicio,
-      y = n
-    ),
-    color = "#2C5F7C",
-    size = 3
-  ) +
-
-  # Líneas que conectan 2024 con las etiquetas
-  geom_segment(
-    data = etiquetas_2024,
-    aes(
-      x = 2024,
-      xend = 2024.7,
-      y = n,
-      yend = posicion_etiqueta
-    ),
-    color = "#B8C3C9",
-    linewidth = 0.4
-  ) +
-
-  # Etiquetas a la derecha
-  geom_text(
-    data = etiquetas_2024,
-    aes(
-      x = 2024.75,
-      y = posicion_etiqueta,
-      label = categoria_delito
-    ),
-    hjust = 0,
-    size = 3.2,
-    color = "#555555"
-  ) +
-
-  scale_x_continuous(
-    breaks = 2016:2024,
-    limits = c(2016, 2028)
-  ) +
-
-  scale_y_continuous(
-    labels = scales::label_comma(),
-    expand = expansion(mult = c(0.02, 0.08))
-  ) +
-
-  labs(
-    title = "Evolución de carpetas de investigación por categoría delictiva",
-    subtitle = "Categorías con mayor número de carpetas | Ciudad de México | 2016-2024",
-    x = "Año de inicio",
-    y = "Número de carpetas de investigación",
-    caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
-  ) +
-
-  theme_minimal(base_size = 14) +
-
-  theme(
-    plot.title = element_text(
-      size = 18,
-      face = "bold"
-    ),
-
-    plot.subtitle = element_text(
-      size = 12,
-      color = "#666666",
-      margin = margin(b = 15)
-    ),
-
-    axis.text.x = element_text(
-      size = 11
-    ),
-
-    axis.text.y = element_text(
-      size = 10,
-      color = "#555555"
-    ),
-
-    axis.title = element_text(
-      size = 11
-    ),
-
-    panel.grid.major.y = element_line(
-      color = "#E5E5E5",
-      linewidth = 0.4
-    ),
-
-    panel.grid.major.x = element_blank(),
-
-    panel.grid.minor = element_blank(),
-
-    plot.caption = element_text(
-      size = 9,
-      color = "#777777",
-      hjust = 0,
-      margin = margin(t = 15)
-    ),
-
-    plot.margin = margin(
-      20, 40, 20, 20
-    )
-  )
-
-windows(width = 18, height = 10)
-
-print(grafico_temporal_categorias)
-```
-
-# Ahora analizaremos los delitos pertenecientes a delitos de bajo impacto y su evolución a lo largo del tiempo
-```{r Evolución de los principales delitos de bajo impacto}
-# top 10
-
-top10_delitos <- datos_filtrados %>%
-  filter(
-    anio_inicio >= 2016,
-    anio_inicio <= 2024,
-    categoria_delito == "Delito de bajo impacto",
-    !is.na(delito)
-  ) %>%
-  count(delito, sort = TRUE) %>%
-  slice_head(n = 10) %>%
-  pull(delito)
-
-
-# serie temporal
-
-temporal_bajo_impacto <- datos_filtrados %>%
-  filter(
-    anio_inicio >= 2016,
-    anio_inicio <= 2024,
-    categoria_delito == "Delito de bajo impacto",
-    delito %in% top10_delitos
-  ) %>%
-  count(anio_inicio, delito)
-
-
-# delito principal
-
-delito_principal <- temporal_bajo_impacto %>%
-  group_by(delito) %>%
-  summarise(
-    total = sum(n),
-    .groups = "drop"
-  ) %>%
-  slice_max(
-    order_by = total,
-    n = 1,
-    with_ties = FALSE
-  ) %>%
-  pull(delito)
-
-# etiquetas
-
-etiquetas_finales <- temporal_bajo_impacto %>%
-  filter(anio_inicio == 2024) %>%
-  arrange(desc(n)) %>%
-  mutate(
-    posicion_etiqueta = seq(
-      from = max(n),
-      to = min(n),
-      length.out = n()
-    )
-  )
-
-
-# gráfico
-
-grafico_temporal_bajo_impacto <- ggplot() +
 
   # líneas secundarias
 
   geom_line(
-    data = temporal_bajo_impacto %>%
-      filter(delito != delito_principal),
+    data = temporal_categoria %>%
+      filter(
+        categoria_delito != categoria_principal
+      ),
     aes(
       x = anio_inicio,
       y = n,
-      group = delito
+      group = categoria_delito
     ),
     color = "#9E9E9E",
     linewidth = 0.8,
     alpha = 0.8
   ) +
 
+  # puntos secundarios
+
   geom_point(
-    data = temporal_bajo_impacto %>%
-      filter(delito != delito_principal),
+    data = temporal_categoria %>%
+      filter(
+        categoria_delito != categoria_principal
+      ),
     aes(
       x = anio_inicio,
-      y = n,
-      group = delito
+      y = n
     ),
     color = "#9E9E9E",
     size = 2.2,
@@ -674,20 +516,26 @@ grafico_temporal_bajo_impacto <- ggplot() +
   # línea principal
 
   geom_line(
-    data = temporal_bajo_impacto %>%
-      filter(delito == delito_principal),
+    data = temporal_categoria %>%
+      filter(
+        categoria_delito == categoria_principal
+      ),
     aes(
       x = anio_inicio,
       y = n,
-      group = delito
+      group = categoria_delito
     ),
     color = "#2C5F7C",
     linewidth = 1.8
   ) +
 
+  # puntos de la categoría principal
+
   geom_point(
-    data = temporal_bajo_impacto %>%
-      filter(delito == delito_principal),
+    data = temporal_categoria %>%
+      filter(
+        categoria_delito == categoria_principal
+      ),
     aes(
       x = anio_inicio,
       y = n
@@ -699,27 +547,31 @@ grafico_temporal_bajo_impacto <- ggplot() +
   # conectores secundarios
 
   geom_segment(
-    data = etiquetas_finales %>%
-      filter(delito != delito_principal),
+    data = etiquetas_2024 %>%
+      filter(
+        categoria_delito != categoria_principal
+      ),
     aes(
       x = 2024,
-      xend = 2024.8,
       y = n,
+      xend = 2026.2,
       yend = posicion_etiqueta
     ),
     color = "#B0B0B0",
     linewidth = 0.35
   ) +
 
-  # conector principal
+  # conector de la categoría principal
 
   geom_segment(
-    data = etiquetas_finales %>%
-      filter(delito == delito_principal),
+    data = etiquetas_2024 %>%
+      filter(
+        categoria_delito == categoria_principal
+      ),
     aes(
       x = 2024,
-      xend = 2024.8,
       y = n,
+      xend = 2026.2,
       yend = posicion_etiqueta
     ),
     color = "#2C5F7C",
@@ -729,39 +581,62 @@ grafico_temporal_bajo_impacto <- ggplot() +
   # etiquetas secundarias
 
   geom_text(
-    data = etiquetas_finales %>%
-      filter(delito != delito_principal),
+    data = etiquetas_2024 %>%
+      filter(
+        categoria_delito != categoria_principal
+      ),
     aes(
-      x = 2024.9,
+      x = 2026.35,
       y = posicion_etiqueta,
-      label = delito
+      label = etiqueta
     ),
-    color = "#555555",
     hjust = 0,
-    size = 3.8
+    vjust = 0.5,
+    size = 3.5,
+    lineheight = 0.9,
+    color = "#555555"
   ) +
 
-  # etiqueta principal
+  # etiqueta de la categoría principal
 
   geom_text(
-    data = etiquetas_finales %>%
-      filter(delito == delito_principal),
+    data = etiquetas_2024 %>%
+      filter(
+        categoria_delito == categoria_principal
+      ),
     aes(
-      x = 2024.9,
+      x = 2026.35,
       y = posicion_etiqueta,
-      label = delito
+      label = etiqueta
     ),
-    color = "#2C5F7C",
-    fontface = "bold",
     hjust = 0,
-    size = 4.1
+    vjust = 0.5,
+    size = 3.9,
+    lineheight = 0.9,
+    color = "#2C5F7C",
+    fontface = "bold"
   ) +
 
   # eje x
 
   scale_x_continuous(
-    breaks = 2016:2024,
-    limits = c(2016, 2028)
+    breaks = 2016:2025,
+    labels = c(
+      "2016",
+      "2017",
+      "2018",
+      "2019",
+      "2020",
+      "2021",
+      "2022",
+      "2023",
+      "2024",
+      "2025*"
+    ),
+    limits = c(
+      2016,
+      2032
+    )
   ) +
 
   # eje y
@@ -769,25 +644,38 @@ grafico_temporal_bajo_impacto <- ggplot() +
   scale_y_continuous(
     labels = scales::label_comma(),
     expand = expansion(
-      mult = c(0.03, 0.08)
+      mult = c(0.02, 0.08)
     )
   ) +
 
   # títulos
 
   labs(
-    title = "Evolución de los principales delitos de bajo impacto",
-    subtitle = paste0("Ciudad de México | Delitos con mayor número de carpetas | 2016-2024"),
+    title = "Evolución de carpetas de investigación por categoría delictiva",
+
+    subtitle = paste0(
+      "10 categorías con mayor número de carpetas | ",
+      "Ciudad de México | 2016-2025*"
+    ),
+
     x = "Año de inicio",
+
     y = "Número de carpetas de investigación",
-    caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
+
+    caption = paste0(
+      "Fuente: Datos Abiertos de la Ciudad de México - FGJ\n",
+      "*2025 incluye únicamente registros de enero."
+    )
   ) +
 
   # tema
 
-  theme_minimal(base_size = 14) +
+  theme_minimal(
+    base_size = 14
+  ) +
 
   theme(
+
     plot.title = element_text(
       size = 18,
       face = "bold"
@@ -796,7 +684,9 @@ grafico_temporal_bajo_impacto <- ggplot() +
     plot.subtitle = element_text(
       size = 12,
       color = "#666666",
-      margin = margin(b = 15)
+      margin = margin(
+        b = 15
+      )
     ),
 
     axis.text.x = element_text(
@@ -827,24 +717,403 @@ grafico_temporal_bajo_impacto <- ggplot() +
       size = 9,
       color = "#777777",
       hjust = 0,
-      margin = margin(t = 15)
+      margin = margin(
+        t = 15
+      )
     ),
 
     plot.margin = margin(
       20,
-      80,
+      100,
       20,
       20
     )
   )
 
 
-windows(width = 20,height = 10)
-print(grafico_temporal_bajo_impacto)
+# mostrar gráfico
 
+windows(
+  width = 20,
+  height = 11
+)
+
+print(
+  grafico_temporal_categorias
+)
+```
+
+# Ahora analizaremos los delitos pertenecientes a delitos de bajo impacto y su evolución a lo largo del tiempo
+```{r Evolución de los principales delitos de bajo impacto}
+
+# top 10
+# se utilizan únicamente los años completos 2016-2024
+
+top10_delitos <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2024,
+    categoria_delito == "Delito de bajo impacto",
+    !is.na(delito)
+  ) %>%
+  count(
+    delito,
+    sort = TRUE
+  ) %>%
+  slice_head(
+    n = 10
+  ) %>%
+  pull(
+    delito
+  )
+
+
+# serie temporal
+# se incluye enero de 2025 para mostrar la información disponible
+
+temporal_bajo_impacto <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2025,
+    categoria_delito == "Delito de bajo impacto",
+    delito %in% top10_delitos
+  ) %>%
+  count(
+    anio_inicio,
+    delito
+  )
+
+
+# delito principal
+# se determina únicamente con los años completos 2016-2024
+
+delito_principal <- temporal_bajo_impacto %>%
+  filter(
+    anio_inicio <= 2024
+  ) %>%
+  group_by(
+    delito
+  ) %>%
+  summarise(
+    total = sum(n),
+    .groups = "drop"
+  ) %>%
+  slice_max(
+    order_by = total,
+    n = 1,
+    with_ties = FALSE
+  ) %>%
+  pull(
+    delito
+  )
+
+
+# etiquetas
+# se utiliza 2024 por ser el último año completo
+
+etiquetas_finales <- temporal_bajo_impacto %>%
+  filter(
+    anio_inicio == 2024
+  ) %>%
+  arrange(
+    desc(n)
+  )
+
+
+# valor máximo para distribuir las etiquetas
+
+max_y <- max(
+  temporal_bajo_impacto$n,
+  na.rm = TRUE
+)
+
+
+# posiciones de las etiquetas
+
+etiquetas_finales <- etiquetas_finales %>%
+  mutate(
+    posicion_etiqueta = seq(
+      from = max_y * 0.98,
+      to = max_y * 0.10,
+      length.out = n()
+    ),
+
+    etiqueta = stringr::str_wrap(
+      delito,
+      width = 32
+    )
+  )
+
+
+# gráfico
+
+grafico_temporal_bajo_impacto <- ggplot() +
+
+  # líneas secundarias
+
+  geom_line(
+    data = temporal_bajo_impacto %>%
+      filter(
+        delito != delito_principal
+      ),
+    aes(
+      x = anio_inicio,
+      y = n,
+      group = delito
+    ),
+    color = "#9E9E9E",
+    linewidth = 0.8,
+    alpha = 0.8
+  ) +
+
+  # puntos secundarios
+
+  geom_point(
+    data = temporal_bajo_impacto %>%
+      filter(
+        delito != delito_principal
+      ),
+    aes(
+      x = anio_inicio,
+      y = n
+    ),
+    color = "#9E9E9E",
+    size = 2.2,
+    alpha = 0.85
+  ) +
+
+  # línea principal
+
+  geom_line(
+    data = temporal_bajo_impacto %>%
+      filter(
+        delito == delito_principal
+      ),
+    aes(
+      x = anio_inicio,
+      y = n,
+      group = delito
+    ),
+    color = "#2C5F7C",
+    linewidth = 1.8
+  ) +
+
+  # puntos del delito principal
+
+  geom_point(
+    data = temporal_bajo_impacto %>%
+      filter(
+        delito == delito_principal
+      ),
+    aes(
+      x = anio_inicio,
+      y = n
+    ),
+    color = "#2C5F7C",
+    size = 3.5
+  ) +
+
+  # conectores secundarios
+
+  geom_segment(
+    data = etiquetas_finales %>%
+      filter(
+        delito != delito_principal
+      ),
+    aes(
+      x = 2024,
+      y = n,
+      xend = 2026.2,
+      yend = posicion_etiqueta
+    ),
+    color = "#B0B0B0",
+    linewidth = 0.35
+  ) +
+
+  # conector principal
+
+  geom_segment(
+    data = etiquetas_finales %>%
+      filter(
+        delito == delito_principal
+      ),
+    aes(
+      x = 2024,
+      y = n,
+      xend = 2026.2,
+      yend = posicion_etiqueta
+    ),
+    color = "#2C5F7C",
+    linewidth = 0.6
+  ) +
+
+  # etiquetas secundarias
+
+  geom_text(
+    data = etiquetas_finales %>%
+      filter(
+        delito != delito_principal
+      ),
+    aes(
+      x = 2026.35,
+      y = posicion_etiqueta,
+      label = etiqueta
+    ),
+    color = "#555555",
+    hjust = 0,
+    vjust = 0.5,
+    size = 3.5,
+    lineheight = 0.9
+  ) +
+
+  # etiqueta principal
+
+  geom_text(
+    data = etiquetas_finales %>%
+      filter(
+        delito == delito_principal
+      ),
+    aes(
+      x = 2026.35,
+      y = posicion_etiqueta,
+      label = etiqueta
+    ),
+    color = "#2C5F7C",
+    fontface = "bold",
+    hjust = 0,
+    vjust = 0.5,
+    size = 3.9,
+    lineheight = 0.9
+  ) +
+
+  # eje x
+
+  scale_x_continuous(
+    breaks = 2016:2025,
+    labels = c(
+      "2016",
+      "2017",
+      "2018",
+      "2019",
+      "2020",
+      "2021",
+      "2022",
+      "2023",
+      "2024",
+      "2025*"
+    ),
+    limits = c(
+      2016,
+      2031
+    )
+  ) +
+
+  # eje y
+
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(
+      mult = c(0.03, 0.08)
+    )
+  ) +
+
+  # títulos
+
+  labs(
+    title = "Evolución de los principales delitos de bajo impacto",
+
+    subtitle = paste0(
+      "10 delitos con mayor número de carpetas | ",
+      "Ciudad de México | 2016-2025*"
+    ),
+
+    x = "Año de inicio",
+
+    y = "Número de carpetas de investigación",
+
+    caption = paste0(
+      "Fuente: Datos Abiertos de la Ciudad de México - FGJ\n",
+      "*2025 incluye únicamente registros de enero."
+    )
+  ) +
+
+  # tema
+
+  theme_minimal(
+    base_size = 14
+  ) +
+
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666",
+      margin = margin(
+        b = 15
+      )
+    ),
+
+    axis.text.x = element_text(
+      size = 11
+    ),
+
+    axis.text.y = element_text(
+      size = 10,
+      color = "#555555"
+    ),
+
+    axis.title = element_text(
+      size = 11
+    ),
+
+    legend.position = "none",
+
+    panel.grid.major.y = element_line(
+      color = "#E5E5E5",
+      linewidth = 0.4
+    ),
+
+    panel.grid.major.x = element_blank(),
+
+    panel.grid.minor = element_blank(),
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0,
+      margin = margin(
+        t = 15
+      )
+    ),
+
+    plot.margin = margin(
+      20,
+      100,
+      20,
+      20
+    )
+  )
+
+
+# mostrar gráfico
+
+windows(
+  width = 20,
+  height = 11
+)
+
+print(
+  grafico_temporal_bajo_impacto
+)
 ```
 # Analizaremos el numero de carpetas delictivas por alcaldia, pero primero vamos a estandarizar el nombre de las alcaldias para después hacer join con el archivo shp obtenido de datos cdmx
 ```{r Estandarizar alcaldias}
+# Leer datos abiertos de la cdmx para alcaldias
+mapa_alcaldias <- st_read("poligonos_alcaldias_cdmx.shp")
 # Preparar nombres del shapefile
 nombres_alcaldias <- mapa_alcaldias %>%
   st_drop_geometry() %>%
@@ -860,7 +1129,7 @@ nombres_alcaldias <- mapa_alcaldias %>%
 distribucion_alcaldias <- datos_filtrados %>%
   filter(
     anio_inicio >= 2016,
-    anio_inicio <= 2024,
+    anio_inicio <= 2025,
     !is.na(alcaldia_hecho),
     !alcaldia_hecho %in% c(
       "NaN",
@@ -950,7 +1219,7 @@ grafico_mapa_alcaldias <- ggplot(mapa_carpetas) +
 
   labs(
     title = "Distribución de carpetas de investigación por alcaldía",
-    subtitle = "Ciudad de México | 2016-2024",
+    subtitle = "Ciudad de México | 2016-2025",
     caption = "Fuente: Datos Abiertos de la Ciudad de México - FGJ"
   ) +
 
@@ -994,6 +1263,714 @@ windows(width = 17, height = 12)
 
 print(grafico_mapa_alcaldias)
 ```
+#Clusters por alcaldia
+```{r}
+# datos para clustering excluyendo Feminicidio, Plagio o secuestro y hecho no delictivo, inlcuyendo los 10 delitos de bajo impacto con mayor presencia
+
+# top 10 delitos de bajo impacto
+
+top10_bajo_impacto <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2025,
+    categoria_delito == "Delito de bajo impacto",
+    !is.na(delito)
+  ) %>%
+  count(
+    delito,
+    sort = TRUE
+  ) %>%
+  slice_head(
+    n = 10
+  ) %>%
+  pull(
+    delito
+  )
+
+
+# preparar datos para clustering
+
+# preparar datos para clustering
+
+datos_cluster <- datos_filtrados %>%
+  filter(
+    anio_inicio >= 2016,
+    anio_inicio <= 2025,
+    !is.na(alcaldia_hecho),
+    !alcaldia_hecho %in% c(
+      "Nan",
+      "nan",
+      "Cdmx (indeterminada)"
+    ),
+    !is.na(categoria_delito),
+    !categoria_delito %in% c(
+      "Feminicidio",
+      "Plagio o secuestro",
+      "Hecho no delictivo"
+    )
+  ) %>%
+  mutate(
+    categoria_cluster = case_when(
+
+      categoria_delito == "Delito de bajo impacto" &
+        delito %in% top10_bajo_impacto ~ delito,
+
+      categoria_delito == "Delito de bajo impacto" ~
+        "Otros delitos de bajo impacto",
+
+      TRUE ~ categoria_delito
+    )
+  )
+
+# distribución de categorías para clustering
+
+categorias_cluster <- datos_cluster %>%
+  count(
+    categoria_cluster,
+    sort = TRUE
+  ) %>%
+  mutate(
+    porcentaje = n / sum(n) * 100
+  )
+
+categorias_cluster
+```
+
+```{r}
+# perfil por alcaldía
+
+perfil_alcaldias <- datos_cluster %>%
+  count(
+    alcaldia_hecho,
+    categoria_cluster
+  ) %>%
+  group_by(
+    alcaldia_hecho
+  ) %>%
+  mutate(
+    proporcion = n / sum(n)
+  ) %>%
+  ungroup()
+
+
+# matriz de proporciones
+
+matriz_alcaldias <- perfil_alcaldias %>%
+  select(
+    alcaldia_hecho,
+    categoria_cluster,
+    proporcion
+  ) %>%
+  pivot_wider(
+    names_from = categoria_cluster,
+    values_from = proporcion,
+    values_fill = 0
+  )
+
+
+# comprobar dimensiones
+
+dim(matriz_alcaldias)
+
+
+# revisar nombres de las variables
+
+names(matriz_alcaldias)
+```
+```{r}
+# variabilidad entre alcaldías
+
+variabilidad_categorias <- matriz_alcaldias %>%
+  select(
+    -alcaldia_hecho
+  ) %>%
+  summarise(
+    across(
+      everything(),
+      list(
+        media = mean,
+        sd = sd,
+        minimo = min,
+        maximo = max
+      )
+    )
+  ) %>%
+  pivot_longer(
+    everything(),
+    names_to = c("categoria", ".value"),
+    names_pattern = "(.*)_(media|sd|minimo|maximo)$"
+  ) %>%
+  mutate(
+    rango = maximo - minimo,
+    cv = if_else(
+      media > 0,
+      sd / media,
+      NA_real_
+    )
+  ) %>%
+  arrange(
+    desc(sd)
+  )
+
+variabilidad_categorias
+```
+```{r}
+# nombres de las alcaldías
+
+nombres_alcaldias <- matriz_alcaldias$alcaldia_hecho
+
+
+# matriz numérica
+
+datos_kmeans <- matriz_alcaldias %>%
+  select(
+    -alcaldia_hecho
+  )
+
+
+# estandarizar variables
+
+datos_kmeans_scaled <- scale(
+  datos_kmeans
+)
+
+
+# asignar nombres de alcaldías
+
+rownames(datos_kmeans_scaled) <- nombres_alcaldias
+
+```
+```{r}
+# método del codo
+
+set.seed(123)
+
+resultados_codo <- data.frame(
+  k = 1:6,
+  wss = NA
+)
+
+for (k in 1:6) {
+
+  modelo <- kmeans(
+    datos_kmeans_scaled,
+    centers = k,
+    nstart = 50
+  )
+
+  resultados_codo$wss[k] <- modelo$tot.withinss
+}
+
+
+# gráfico del método del codo
+
+grafico_codo <- ggplot(
+  resultados_codo,
+  aes(
+    x = k,
+    y = wss
+  )
+) +
+
+  geom_line(
+    color = "#2C5F7C",
+    linewidth = 1.2
+  ) +
+
+  geom_point(
+    color = "#2C5F7C",
+    size = 3
+  ) +
+
+  scale_x_continuous(
+    breaks = 1:6
+  ) +
+
+  labs(
+    title = "Selección del número de clusters",
+    subtitle = "Método del codo | K-means",
+    x = "Número de clusters (k)",
+    y = "Suma de cuadrados intra-cluster (WSS)",
+    caption = "Fuente: elaboración propia con datos de la FGJ"
+  ) +
+
+  theme_minimal(
+    base_size = 14
+  ) +
+
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666"
+    ),
+
+    panel.grid.minor = element_blank(),
+
+    panel.grid.major.x = element_blank(),
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0
+    )
+  )
+
+
+windows(
+  width = 10,
+  height = 7
+)
+
+print(
+  grafico_codo
+)
+```
+```{r}
+# cargar librería
+
+library(cluster)
+
+
+# calcular silhouette para k = 2 a k = 6
+
+set.seed(123)
+
+resultados_silhouette <- data.frame(
+  k = 2:6,
+  silhouette = NA_real_
+)
+
+for (k in 2:6) {
+
+  modelo <- kmeans(
+    datos_kmeans_scaled,
+    centers = k,
+    nstart = 50
+  )
+
+  sil <- cluster::silhouette(
+    modelo$cluster,
+    dist(datos_kmeans_scaled)
+  )
+
+  resultados_silhouette$silhouette[
+    resultados_silhouette$k == k
+  ] <- mean(
+    sil[, 3]
+  )
+}
+
+
+# mostrar resultados
+
+resultados_silhouette
+
+
+# gráfico de silhouette
+
+grafico_silhouette <- ggplot(
+  resultados_silhouette,
+  aes(
+    x = k,
+    y = silhouette
+  )
+) +
+
+  geom_line(
+    color = "#2C5F7C",
+    linewidth = 1.2
+  ) +
+
+  geom_point(
+    color = "#2C5F7C",
+    size = 3
+  ) +
+
+  scale_x_continuous(
+    breaks = 2:6
+  ) +
+
+  scale_y_continuous(
+    labels = scales::label_number(
+      accuracy = 0.01
+    )
+  ) +
+
+  labs(
+    title = "Evaluación del número de clusters",
+    subtitle = "Coeficiente silhouette promedio | K-means",
+    x = "Número de clusters (k)",
+    y = "Silhouette promedio",
+    caption = "Fuente: elaboración propia con datos de la FGJ"
+  ) +
+
+  theme_minimal(
+    base_size = 14
+  ) +
+
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666"
+    ),
+
+    axis.text.x = element_text(
+      size = 11
+    ),
+
+    axis.text.y = element_text(
+      size = 10,
+      color = "#555555"
+    ),
+
+    axis.title = element_text(
+      size = 11
+    ),
+
+    panel.grid.major.y = element_line(
+      color = "#E5E5E5",
+      linewidth = 0.4
+    ),
+
+    panel.grid.major.x = element_blank(),
+
+    panel.grid.minor = element_blank(),
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0,
+      margin = margin(t = 15)
+    )
+  )
+
+
+# mostrar gráfico
+
+windows(
+  width = 10,
+  height = 7
+)
+
+print(
+  grafico_silhouette
+)
+```
+```{r}
+# modelo k-means con k = 2
+
+set.seed(123)
+
+kmeans_2 <- kmeans(
+  datos_kmeans_scaled,
+  centers = 2,
+  nstart = 50
+)
+
+
+# asignar clusters a las alcaldías
+
+clusters_k2 <- matriz_alcaldias %>%
+  select(
+    alcaldia_hecho
+  ) %>%
+  mutate(
+    cluster = factor(
+      kmeans_2$cluster
+    )
+  )
+
+
+# mostrar resultados
+
+clusters_k2 %>%
+  arrange(
+    cluster,
+    alcaldia_hecho
+  )
+```
+```{r}
+# agregar cluster a las proporciones originales
+
+perfil_clusters_k2 <- matriz_alcaldias %>%
+  left_join(
+    clusters_k2,
+    by = "alcaldia_hecho"
+  )
+
+# perfil promedio de cada cluster
+
+centroides_originales_k2 <- perfil_clusters_k2 %>%
+  group_by(
+    cluster
+  ) %>%
+  summarise(
+    across(
+      -alcaldia_hecho,
+      mean
+    ),
+    .groups = "drop"
+  )
+
+centroides_originales_k2
+
+# convertir perfiles a formato largo
+
+perfil_clusters_long <- centroides_originales_k2 %>%
+  pivot_longer(
+    cols = -cluster,
+    names_to = "categoria",
+    values_to = "proporcion"
+  )
+
+# comparar perfiles de los clusters
+
+comparacion_clusters <- perfil_clusters_long %>%
+  pivot_wider(
+    names_from = cluster,
+    values_from = proporcion,
+    names_prefix = "cluster_"
+  ) %>%
+  mutate(
+    diferencia = cluster_1 - cluster_2
+  ) %>%
+  arrange(
+    desc(abs(diferencia))
+  )
+
+comparacion_clusters
+```
+
+```{r}
+# ============================================================
+# PREPARAR CLUSTERS
+# ============================================================
+
+clusters_mapa <- clusters_k2 %>%
+  mutate(
+    alcaldia_key = alcaldia_hecho %>%
+      stringr::str_to_lower() %>%
+      stringi::stri_trans_general("Latin-ASCII") %>%
+      stringr::str_squish(),
+
+    cluster = factor(
+      cluster,
+      levels = c("1", "2"),
+      labels = c(
+        "Cluster 1",
+        "Cluster 2"
+      )
+    )
+  )
+
+
+# ============================================================
+# PREPARAR MAPA
+# ============================================================
+
+mapa_clusters <- mapa_carpetas %>%
+  mutate(
+    alcaldia_key = NOMGEO %>%
+      stringr::str_to_lower() %>%
+      stringi::stri_trans_general("Latin-ASCII") %>%
+      stringr::str_squish()
+  ) %>%
+
+  left_join(
+    clusters_mapa %>%
+      select(
+        alcaldia_key,
+        cluster
+      ),
+    by = "alcaldia_key"
+  )
+
+
+# ============================================================
+# COMPROBAR JOIN
+# ============================================================
+
+mapa_clusters %>%
+  st_drop_geometry() %>%
+  select(
+    NOMGEO,
+    cluster
+  ) %>%
+  arrange(
+    cluster,
+    NOMGEO
+  )
+
+
+# debe ser 0
+
+sum(
+  is.na(mapa_clusters$cluster)
+)
+
+# ============================================================
+# MAPA FINAL DE CLUSTERS POR ALCALDÍA
+# K-MEANS, k = 2
+# ============================================================
+
+
+# ------------------------------------------------------------
+# ETIQUETAS
+# ------------------------------------------------------------
+
+# Crear posiciones para las etiquetas
+
+etiquetas_clusters <- mapa_clusters %>%
+  st_point_on_surface() %>%
+  cbind(
+    st_coordinates(.)
+  ) %>%
+  mutate(
+    etiqueta = case_when(
+      NOMGEO == "Gustavo A. Madero" ~ "Gustavo A.\nMadero",
+      NOMGEO == "Venustiano Carranza" ~ "Venustiano\nCarranza",
+      NOMGEO == "La Magdalena Contreras" ~ "La Magdalena\nContreras",
+      NOMGEO == "Cuajimalpa de Morelos" ~ "Cuajimalpa\nde Morelos",
+      NOMGEO == "Álvaro Obregón" ~ "Álvaro\nObregón",
+      TRUE ~ NOMGEO
+    )
+  )
+
+
+# ------------------------------------------------------------
+# CREAR MAPA
+# ------------------------------------------------------------
+
+grafico_mapa_clusters <- ggplot(
+  mapa_clusters
+) +
+
+  # polígonos de las alcaldías
+  geom_sf(
+    aes(
+      fill = cluster
+    ),
+    color = "white",
+    linewidth = 0.6
+  ) +
+
+  # nombres de las alcaldías
+  geom_text_repel(
+    data = etiquetas_clusters,
+    aes(
+      x = X,
+      y = Y,
+      label = etiqueta
+    ),
+    size = 3.2,
+    color = "#444444",
+    fontface = "bold",
+    lineheight = 0.9,
+    box.padding = 0.5,
+    point.padding = 0.3,
+    min.segment.length = 0,
+    segment.color = "#888888",
+    segment.linewidth = 0.3,
+    max.overlaps = Inf,
+    seed = 123
+  ) +
+
+  # colores de los clusters
+  scale_fill_manual(
+    values = c(
+      "Cluster 1" = "#2C5F7C",
+      "Cluster 2" = "#A8B8C2"
+    ),
+    name = "Cluster",
+    drop = FALSE
+  ) +
+
+  # títulos
+  labs(
+    title = "Agrupación de alcaldías según su perfil delictivo",
+    subtitle = "K-means (k = 2) | Ciudad de México | 2016-2024",
+    caption = "Fuente: elaboración propia con datos de la FGJ"
+  ) +
+
+  # tema
+  theme_void(
+    base_size = 14
+  ) +
+
+  theme(
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#666666",
+      margin = margin(
+        b = 15
+      )
+    ),
+
+    legend.title = element_text(
+      size = 10,
+      face = "bold"
+    ),
+
+    legend.text = element_text(
+      size = 9
+    ),
+
+    legend.position = "right",
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#777777",
+      hjust = 0,
+      margin = margin(
+        t = 15
+      )
+    ),
+
+    plot.margin = margin(
+      20,
+      40,
+      20,
+      40
+    )
+  )
+
+
+# ------------------------------------------------------------
+# MOSTRAR MAPA
+# ------------------------------------------------------------
+
+windows(
+  width = 17,
+  height = 12
+)
+
+print(
+  grafico_mapa_clusters
+)
+```
+# La representación cartográfica de clusters obtenidos mediante K-means muestra una diferencia territorial en los perfiles de las carpetas de investigación de las alcaldías de la Ciudad de México. El Cluster 1, compuesto por Benito Juárez, Coyoacán, Cuajimalpa de Morelos, Cuauhtémoc y Miguel Hidalgo, presenta una mayor participación relativa de fraude y diversas categorías de delitos patrimoniales. Por su parte, el Cluster 2, integrado por las once alcaldías restantes, se caracteriza principalmente por una mayor participación relativa de violencia familiar, además de mayores proporciones en categorías como amenazas y robo de vehículo con y sin violencia.
+# La distribución cartográfica muestra que las alcaldías pertenecientes al Cluster 1 presentan cierta concentración espacial en zonas centrales y occidentales de la ciudad. Este resultado resulta particularmente relevante debido a que las variables geográficas no fueron incorporadas en el algoritmo K-means; los grupos fueron construidos exclusivamente a partir de la similitud en la composición de las carpetas de investigación. Por tanto, el patrón observado sugiere que alcaldías geográficamente próximas pueden compartir determinadas características en sus perfiles delictivos. No obstante, esta representación debe considerarse descriptiva y no constituye por sí misma evidencia de dependencia espacial.
+# Asimismo, los clusters no representan niveles de peligrosidad ni un orden de mayor o menor incidencia delictiva. El análisis utiliza la composición proporcional de las carpetas y no su volumen absoluto ni tasas ajustadas por población. En consecuencia, el mapa debe interpretarse como una clasificación de las alcaldías según la similitud de sus perfiles de carpetas registradas por la FGJ durante 2016-2024.
+
+
+
+
+
 
 
 
