@@ -1,0 +1,20 @@
+/* Banner del título */
+#title-block-header {
+  color: blue;
+  padding: 40px 0;
+}
+
+/* Títulos con color FGJ */
+h1, h2 {
+  color: #16213e;
+  font-weight: 800;
+  border-bottom: 3px solid #e94560;
+  padding-bottom: 8px;
+}
+h2 { color: #0f3460; border-bottom: none; }
+
+/* Tablas bonitas */
+table {
+  border-radius: 10px;
+  overflow: hidden;
+}
