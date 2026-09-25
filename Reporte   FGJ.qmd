@@ -1,0 +1,195 @@
+---
+title: "PATRONES DELICTIVOS EN LA CIUDAD DE MÉXICO"
+subtitle: "Análisis espacial y temporal de las carpetas de investigación de la FGJ (2016-2024)"
+description: "Diplomado Introducción Analítica a la Ciencia de Datos"
+author:
+  - "Anay Becerra Ayala"
+  - "Bruno Díaz Cuevas"
+  - "Pablo Emilio Nopala Abrin"
+  - "Brandon Patiño González"
+  - "Enrique Olvera Galeana"
+  - "David Suárez López"
+date: "2026-09-30"
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-location: right
+    toc-title: "Contenido del Reporte"
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    link-external-newwindow: true
+    title-block-banner: "#1a252f" 
+    title-block-banner-color: "#ffffff"
+execute:
+  warning: false
+  message: false
+---
+
+# Resumen {.unnumbered}
+
+::: {.callout-note appearance="simple" icon=false}
+Este proyecto analiza la distribución espacio temporal de las carpetas de investigación de la FGJ de la CDMX (2016-2024) utilizando datos abiertos. Tras el procesamiento y limpieza de los registros, se estudió la frecuencia de los principales delitos por sector. Ademas se aplicaron técnicas de clustering para identificar perfiles territoriales con composiciones delictivas similares permitiendo caracterizar la evolución y el riesgo criminal en las distintas zonas de la ciudad.
+:::
+
+
+# Contexto y pregunta de investigación {.unnumbered}
+
+La Ciudad de México presenta una distribución territorial heterogenea de los hechos delictivos registrados por las instituciones de procuración de justicia, las diferencias entre zonas pueden observarse no solamente en el número de carpetas de investigación, sino también en los tipos de delitos que predominan en cada territorio.
+
+El análisis de esta distribución permite estudiar si las distintas alcaldías presentan composiciones delictivas semejantes o si existen perfiles diferenciados, ademas de observar la evolución temporal de los registros, ya que permite identificar cambios en la frecuencia y composición de los delitos a lo largo del periodo.
+
+A partir de esto la pregunta principal del proyecto es:
+
+> **¿Cómo se distribuyen y cómo han evolucionado temporalmente los principales delitos registrados en las carpetas de investigación de la CDMX y qué perfiles territoriales pueden identificarse a partir de la composición delictiva de sus alcaldías?**
+
+De esta pregunta se desprenden las siguientes preguntas secundarias:
+
+- ¿Cuáles son los delitos con mayor presencia en los registros y cómo cambia su frecuencia a través del tiempo?
+- ¿Qué diferencias existen en la composición delictiva entre las alcaldías?
+- ¿Es posible identificar grupos de alcaldías con patrones delictivos similares?
+- ¿Qué características de los registros permiten distinguir estos perfiles territoriales?
+
+
+# Origen y alcance de los datos {.unnumbered}
+
+Los datos utilizados provienen del Portal de Datos Abiertos de la Ciudad de México, específicamente del conjunto de datos correspondiente a las carpetas de investigación de la Fiscalía General de Justicia.
+
+Para este proyecto se utilizó el archivo:
+
+`carpetasFGJ_acumulado_2025_01.csv`
+
+La base contiene 2,098,743 registros y 21 variables, incluyendo información relacionada con la fecha de inicio de la carpeta, fecha del hecho, delito, categoría del delito, alcaldía, colonia y coordenadas geográficas.
+
+Entre las principales variables utilizadas se encuentran:
+
+| Variable | Descripción | Utilidad |
+| :--- | :--- | :--- |
+| `fecha_inicio` | Fecha en que se inició la carpeta | Análisis temporal |
+| `fecha_hecho` | Fecha registrada del hecho | Información temporal |
+| `delito` | Delito registrado | Análisis delictivo |
+| `categoria_delito` | Categoría del delito | Agrupación de delitos |
+| `alcaldia_hecho` | Alcaldía donde ocurrió el hecho | Análisis espacial |
+| `colonia_hecho` | Colonia donde ocurrió el hecho | Análisis territorial |
+| `latitud` | Coordenada de latitud | Análisis geográfico |
+| `longitud` | Coordenada de longitud | Análisis geográfico |
+
+Aunque el archivo contiene información hasta enero de 2025, para las comparaciones anuales se considera principalmente el periodo 2016–2024 debido a que 2025 no representa un año completo.
+
+# Decisiones de limpieza {.unnumbered}
+
+Durante el análisis exploratorio se identificaron algunas características que requerían ser tratadas.
+
+Se eliminaron las variables `colonia_catalogo`, `alcaldia_catalogo` y `municipio_hecho`
+* Las primeras presentaban una cantidad considerable de valores faltantes y resultaban redundantes frente a las variables territoriales utilizadas en el análisis. 
+* Por su parte, `municipio_hecho` presentaba practicamente un único valor, por lo que no aportaba variabilidad al análisis.
+
+Las variables de texto utilizadas fueron posteriormente estandarizadas para evitar diferencias producidas por espacios innecesarios o por el uso inconsistente de mayúsculas y minúsculas.
+
+Durante la revisión de las fechas se identificó un valor atipico en `anio_hecho`, correspondiente al valor 222, debido a que no existia información suficiente para determinar el año correcto, este valor fue tratado como faltante (NA).
+
+También se identificaron registros en los que la fecha del hecho era anterior a la fecha de inicio de la carpeta. Estos registros no fueron eliminados automáticamente, debido a que ambas variables representan momentos diferentes: la fecha en que ocurrió el hecho y la fecha en que se inició la carpeta de investigación. Además, eliminar estos registros podría reducir innecesariamente la información disponible para el análisis.
+
+#```{r}
+#| message: false
+#| warning: false
+
+
+library(dplyr)
+library(readr)
+library(sf) 
+
+
+pob_alcaldia  <- read_csv("POB_por_alcaldia.csv")
+pob_sector    <- read_csv("POB_por_sector.csv")
+pob_cuadrante <- read_csv("POB_por_cuadrante.csv")
+
+
+carpetas <- st_read("carpetas_procesadas.gpkg") %>% 
+  st_drop_geometry()
+
+pob_sector <- pob_sector %>% 
+  rename(sector_id = sector)
+
+delitos_alcaldia <- carpetas %>%
+  group_by(alcaldi) %>%
+  summarise(total_delitos = n(), .groups = 'drop') %>%
+  left_join(pob_alcaldia, by = "alcaldi") %>%
+  mutate(tasa_delitos_por_100k = (total_delitos / POBTOT) * 100000)
+
+delitos_sector <- carpetas %>%
+  group_by(sector_id) %>%
+  summarise(total_delitos = n(), .groups = 'drop') %>%
+  left_join(pob_sector, by = "sector_id") %>%
+  mutate(tasa_delitos_por_habitante = total_delitos / POBTOT)
+
+delitos_cuadrante <- carpetas %>%
+  group_by(cuadrante_id) %>%
+  summarise(total_delitos = n(), .groups = 'drop') %>%
+  left_join(pob_cuadrante, by = "cuadrante_id") %>%
+  mutate(tasa_delitos_por_1k = (total_delitos / POBTOT) * 1000)
+#```
+
+
+
+
+# Metodología {.unnumbered}
+
+### Exploración {.unnumbered}
+
+Analizamos:
+* Estructura de los datos
+* Variables
+* Valores faltantes
+* Distribución de delitos
+* Distribución por alcaldía
+* Comportamiento a través del tiempo
+
+### Análisis temporal {.unnumbered}
+
+Agregamos los registros por:
+
+$$ \text{año} \times \text{delito} $$
+
+y por:
+
+$$ \text{mes} \times \text{delito} $$
+
+para estudiar la evolución y posibles patrones temporales.
+
+### Análisis espacial {.unnumbered}
+
+Agregamos los registros por:
+
+$$ \text{alcaldía} \times \text{delito} $$
+y por:
+
+$$ \text{región} \times \text{delito} $$
+
+para comparar la composición de los registros delictivos entre alcaldías.
+
+Finalmente utilizaremos esa información para construir el modelo de agrupamiento.
+
+# Modelo {.unnumbered}
+
+
+Para identificar grupos de sectores con características delictivas similares se utilizó el algoritmo **K-means**  **clustering** jerárquico.
+
+La unidad de análisis fue la alcaldía y cada una fue representada mediante la proporción de registros correspondientes a los diferentes delitos. De esta manera, el análisis se concentra en la composición relativa de los registros y no únicamente en el número total de carpetas de investigación.
+
+Sea \(x_{ij}\) la proporción de registros correspondientes al delito \(j\) dentro del sector \(i\), la matriz utilizada para el agrupamiento esta formada por los sectores como observaciones y los distintos tipos de delito como variables.
+
+
+
+
+
+
+# Conclusiones y futuro del proyecto {.unnumbered}
+
+## Principales hallazgos {.unnumbered}
+
+## Limitaciones y extensiones {.unnumbered}
+
+
+
