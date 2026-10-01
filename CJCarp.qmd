@@ -1,0 +1,1128 @@
+---
+title: ""
+author: ""
+date: ""
+
+format:
+  pdf:
+    pdf-engine: xelatex
+    documentclass: article
+    toc: false
+    number-sections: true
+    colorlinks: true
+    code-overflow: wrap
+    extra_dependencies: ["colortbl"]
+    geometry:
+      - top=2.5cm
+      - bottom=2.5cm
+      - left=3cm
+      - right=3cm
+
+execute:
+  echo: false
+  warning: false
+  message: false
+  results: hide
+
+editor: visual
+---
+
+\begin{titlepage}
+
+\centering
+
+\vspace*{1.8cm}
+
+{\Large\textbf{Universidad Nacional Autónoma de México}\par}
+
+\vspace{0.3cm}
+
+{\large Facultad de Ciencias\par}
+
+\vspace{2.2cm}
+
+{\Huge\textbf{Analizar la distribución espacial y temporal}\\[0.3cm]
+\textbf{de las carpetas de investigación de la FGJ}\par}
+
+\vspace{1cm}
+
+{\Large Reporte de proyecto\par}
+
+\vspace{1.5cm}
+
+{\large\textbf{Diplomado:} Introducción Analítica a la Ciencia de Datos\par}
+
+\vfill
+
+{\Large\textbf{Integrantes}\par}
+
+\vspace{0.6cm}
+
+\begin{tabular}{c}
+Anay Becerra Ayala\\
+Bruno Díaz Cuevas\\
+Pablo Emilio Nopala Abrin\\
+Brandon Patiño González\\
+Enrique Olvera Galeana\\
+David Suárez López
+\end{tabular}
+
+\vfill
+
+{\large Septiembre 2026\par}
+
+\end{titlepage}
+
+\newpage
+
+```{r, echo=FALSE, warning=FALSE}
+   library(reticulate)
+   use_condaenv("r-reticulate", required = TRUE)
+```
+
+```{python, echo=FALSE, warning=FALSE}
+from pathlib import Path
+import pandas as pd
+import geopandas as gpd
+import numpy as np
+import matplotlib.pyplot as plt
+
+import functools as ft
+```
+
+```{python, echo=FALSE, warning=FALSE}
+# Leyendo geoDF de cuadrantes y creando geoDF de Sectores
+IDs_cuadrantes_sectores= pd.read_csv("Data/Raw/IDs_cuadrantes_sectores.csv")
+cuadrantes= gpd.read_file("Data/Raw/cuadrantes").to_crs("EPSG:6372")
+
+
+cuadrantes= cuadrantes.merge(IDs_cuadrantes_sectores)
+cuadrantes.zona= cuadrantes.zona.map({'PONIENTE': "P", 'CENTRO': "C", 'NORTE': "N", 'SUR': "S", 'ORIENTE': "O"})
+cuadrantes.drop(columns= ["geo_shp", 'g_pnt_2'], inplace= True)
+#cuadrantes.drop(columns= "geometry").to_csv("cuadrantes.csv")
+
+sectores= cuadrantes.dissolve(by='sector').drop(columns= ['_id', 'id', 'no_regn', 'no_cdrn', "cuadrante_id"]).reset_index()
+sectores.set_index("sector_id", inplace= True)
+
+```
+
+```{python, echo=FALSE, output= FALSE, warning=FALSE}
+sectores.plot(color= "white", edgecolor='black')
+plt.show()
+```
+
+```{python, include=FALSE}
+# Leyendo Carpetas
+
+local_file = Path("Data/Raw/carpetasFGJ_acumulado_2025_01.csv")
+url = "https://datos.cdmx.gob.mx/datastore/dump/35e87ce4-8e40-4de4-8dac-0b59645c13eb?bom=True"
+
+if local_file.exists():
+    print("Reading local file...")
+    carpetas = pd.read_csv(local_file)
+else:
+    print("Local file not found. Downloading from URL...")
+    carpetas = pd.read_csv(url)
+
+carpetas.dropna(subset= ["latitud", "longitud", "fecha_inicio", "fecha_hecho"], axis=0, inplace= True)
+# carpetas= carpetas[carpetas.categoria_delito != 'HECHO NO DELICTIVO']
+
+# Quitamos estas columns (Aunque alcaldía_hecho es relevante. Se puede calcular por las coordenadas)
+cols2drop= ['competencia', 'competencia', 'fiscalia',
+            'agencia','unidad_investigacion', 'colonia_hecho',
+            'colonia_catalogo','alcaldia_hecho', 'alcaldia_catalogo',
+            'municipio_hecho',]
+
+carpetas.drop(columns= cols2drop, inplace= True)
+
+
+# Convirtiendo a Geopandas
+carpetas = gpd.GeoDataFrame(
+    carpetas,
+    geometry=gpd.points_from_xy(carpetas.longitud, carpetas.latitud),
+    crs="EPSG:4326"
+).to_crs("EPSG:6372")
+
+# Creando columnas datetime para hecho de delito y apertura de carpeta
+carpetas["datetime_hecho"]= pd.to_datetime(
+    carpetas["fecha_hecho"].str.split().str[0] + " " + carpetas["hora_hecho"],
+    errors="coerce"
+)
+
+carpetas["datetime_inicio"]= pd.to_datetime(
+    carpetas["fecha_inicio"].str.split().str[0] + " " + carpetas["hora_inicio"],
+    errors="coerce"
+)
+
+# Quitando la hora de las fechas que tienen info extra
+carpetas["fecha_hecho"] = pd.to_datetime(carpetas["fecha_hecho"], errors="coerce").dt.normalize()
+carpetas["fecha_inicio"] = pd.to_datetime(carpetas["fecha_inicio"], errors="coerce").dt.normalize()
+
+# Quitando minutos de las horas para simplificar
+carpetas["hora_hecho"]= carpetas["hora_hecho"].str.split(":").str[0]
+carpetas["hora_inicio"]= carpetas["hora_inicio"].str.split(":").str[0]
+
+```
+
+# Metodologia
+
+## Fuentes de información y y preparación de datos
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+carpetas.delito.nunique()
+```
+
+Para la elaboración del análisis se integró información proveniente de la Fiscalía General de Justicia, la división territorial por cuadrantes y sectores, y los datos de población del INEGI-SCITEL. Dado que la variable `delito` presentaba una alta dispersión con 356 valores distintos, se optó por trabajar con `categoria_delito`, la cual agrupa las incidencias en categorías generales que facilitan el clustering y la comparación intersectorial. El estudio se acotó al periodo 2016–2024, excluyendo los años previos por contar con un volumen insuficiente de registros y el año 2025 por registrar únicamente información de enero, asegurando así una comparación temporal consistente.
+
+```{python, echo=FALSE, warning=FALSE}
+# Quitamos carpetas de delitos ocurridos ANTES de 2015
+carpetas= carpetas[carpetas.anio_hecho.between(2016,2024)]
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE }
+carpetas.groupby("categoria_delito").apply(lambda x: len(x)).sort_values(ascending= False)
+```
+
+Durante la revisión inicial se identificó una baja frecuencia en las categorías `FEMINICIDIO` y `PLAGIO_O_SECUESTRO`. Al examinar a detalle la variable de origen, se observó que varios casos de feminicidio estaban clasificados bajo `HOMICIDIO_DOLOSO`, mientras que distintas modalidades de secuestro utilizaban la denominación de `PLAGIO_O_SECUESTRO`, la cual corresponde al término jurídico formal con el que el Código Penal en México contempla este delito. Para corregir estas inconsistencias y unificar los registros, se reasignaron a `FEMINICIDIO` todas las incidencias con la raíz `feminicid-` y a `SECUESTRO_O_PLAGIO` aquellas relacionadas con `secuestro` o `plagio`, garantizando una representación precisa de ambas categorías.
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+carpetas[carpetas.categoria_delito== "HOMICIDIO DOLOSO"].delito.unique()
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+# Revisar los valores exactos antes de reclasificar
+print(carpetas[carpetas.categoria_delito == "HOMICIDIO DOLOSO"].delito.value_counts())
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+feminicidios = carpetas.delito.str.contains("FEMINICID", case=False, na=False)
+carpetas.loc[feminicidios, "categoria_delito"] = "FEMINICIDIO"
+
+print(carpetas.categoria_delito.value_counts())
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+secuestros = carpetas.delito.str.contains("SECUESTRO|PLAGIO", case=False, na=False)
+carpetas.loc[secuestros, "categoria_delito"] = "SECUESTRO O PLAGIO"
+
+print(carpetas.categoria_delito.value_counts())
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+print(carpetas[carpetas.categoria_delito == "SECUESTRO O PLAGIO"].delito.value_counts())
+```
+
+```{python, include=FALSE}
+# esta función cuenta cuantos puntos (points) caen en cada poligono (polygons) y regresa una Serie
+def count_points_in_polygons(polygons, points):
+
+    if polygons.crs != points.crs:
+        points = points.to_crs(polygons.crs)
+
+    polygons = polygons.copy()
+    polygons["_polygon_id"] = range(len(polygons))
+
+    joined = gpd.sjoin(
+        points,
+        polygons[["_polygon_id", "geometry"]],
+        how="left",
+        predicate="within"
+    )
+
+    return (
+        joined.groupby("_polygon_id")
+        .size()
+        .reindex(polygons["_polygon_id"], fill_value=0)
+        .set_axis(polygons.index)
+        .astype(int)
+    )
+
+# Guardamos en delitos_por_sector la cuenta de cuantos delitos occurren por cada secor (agrupado por tipo de delito)
+delitos_por_sector= sectores.copy(deep= True)
+
+for delito, sub_df in carpetas.groupby("categoria_delito"):
+
+    cuenta= count_points_in_polygons(sectores, sub_df)
+
+    delitos_por_sector[delito]= cuenta
+    
+
+```
+
+```{python, include= FALSE}
+delitos_por_sector.to_file("Data/Procesada/delitos_por_sector.gpkg", driver="GPKG")
+```
+
+```{python, include=FALSE}
+# Esta función regresa el ID del polígono donde cae cada punto.
+def get_polygon_for_points(polygons, points):
+
+
+    if polygons.crs != points.crs:
+        points = points.to_crs(polygons.crs)
+
+    # Give the polygon index an explicit, unique column name
+    polygons_tmp = polygons[["geometry"]].copy()
+    polygons_tmp["_polygon_id"] = polygons_tmp.index
+
+    joined = gpd.sjoin(
+        points,
+        polygons_tmp,
+        how="left",
+        predicate="within"
+    )
+
+    return joined["_polygon_id"].set_axis(points.index)
+
+# Agregamos al df carpetas el secotr donde ocurrió cada delito
+secto_por_carpeta= get_polygon_for_points(sectores, carpetas)
+carpetas['sector']= secto_por_carpeta
+
+cuadrante_por_carpeta= get_polygon_for_points(cuadrantes.set_index("cuadrante_id"), carpetas)
+carpetas['cuadrante']= cuadrante_por_carpeta
+
+carpetas["alcaldia"]= carpetas.sector.map(sectores.alcaldi)
+```
+
+```{python, include=FALSE}
+# Guardamos carpetas con etiqueta de sector en un CSV
+carpetas.to_csv("Data/Procesada/carpetas_procesadas.csv")
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+# Ejemplo: Mapa de homicidios dolosos (todo el año)
+
+fig, ax = plt.subplots(figsize=(10, 10))
+#sectores.plot(ax=ax, color="lightgrey", edgecolor="white", zorder=1)
+
+delitos_por_sector.plot(ax=ax, column= "HOMICIDIO DOLOSO", legend=True, edgecolor='black')
+carpetas[carpetas.categoria_delito=="HOMICIDIO DOLOSO"].plot(ax=ax, markersize= 0.5, color= "red")
+
+plt.show()
+```
+
+```{python, include=FALSE}
+# Leemos polígonos de AEGBs de la CDMX
+# https://datos.cdmx.gob.mx/dataset/poligonos-de-manzanas-de-la-ciudad-de-mexico/resource/76c6456d-660c-4e78-81c3-44ee51dcae10
+agebs= gpd.read_file( "Data/Raw/AGEB_CDMX.json").to_crs("EPSG:6372").set_index("CVEGEO")
+
+
+# Leemos data del censo 2020
+# https://www.inegi.org.mx/app/scitel/Default?ev=10
+data_inegi= pd.read_csv("Data/Raw/SCITEL/RESAGEBURB_09CSV20.csv")
+# Nos quedamos por la info por AGEB
+data_inegi= data_inegi[  (data_inegi.NOM_LOC =="Total AGEB urbana") ]
+
+# Creamos nuevo index para hacer match con geoDF agebs
+# El nuevo index está formado por las claves de entidad, municipio, localidad y AGEB (equivalente a CVEGEO en agebs)
+data_inegi["CVEGEO"]= data_inegi["ENTIDAD"].astype(str).str.zfill(2) + \
+data_inegi["MUN"].astype(str).str.zfill(3) + \
+data_inegi["LOC"].astype(str).str.zfill(4) + \
+data_inegi["AGEB"].astype(str).str.zfill(4)
+
+data_inegi.set_index("CVEGEO", inplace= True)
+
+
+# Juntamos los poligonos de las AGEBS con la data del INEGI.
+# Existen 2 AGEBS que no tiene data de inegi, las omitimos. (POSIBLE ALTERNATIVA, IMPUTAR USANDO VECINOS)
+
+agebs= pd.concat([agebs, data_inegi], axis=1).dropna()
+
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+# Así se ven las AGEBs (Ejemplo de población total)
+
+fig, ax = plt.subplots(figsize=(10, 10))
+agebs.plot(ax= ax, column= "POBTOT", edgecolor='black')
+plt.show()
+```
+
+```{python, include=FALSE}
+# Sustituimos la columna "geometry" (con polígonos) de agebs por los centroides
+agebs["geometry"]= agebs.centroid
+# Asignamos un sector a cada AGEB
+agebs["sector"]= get_polygon_for_points(sectores, agebs)
+```
+
+```{python, include=FALSE}
+# Calculamos el total de los indicadores por sector.
+# Quitamos columnas que no tienen sentido sumar
+cols2ignore= ['CVE_ENT', 'CVE_MUN', 'CVE_LOC', 'CVE_AGEB', 'geometry', 'ENTIDAD',
+       'NOM_ENT', 'MUN', 'NOM_MUN', 'LOC', 'NOM_LOC', 'AGEB', 'MZA'] + \
+["REL_H_M", "PROM_HNV", "GRAPROES", "GRAPROES_F", "GRAPROES_M", "PROM_OCUP", "PRO_OCUP_C"]
+
+# Se calcula la suma de indicadores por sector
+data_por_sector= agebs.drop(columns= cols2ignore).groupby("sector").apply(lambda group: group.replace({"*": 0}).astype(int).sum(), include_groups=False )
+
+```
+
+```{python, include=FALSE}
+# Guardamos data por sector como csv
+data_por_sector.to_csv("Data/Procesada/SCITEL_por_sector.csv")
+
+# Guardamos data por sector con polígonos (como gpkg)
+pd.concat( [sectores, data_por_sector], axis=1).to_file("Data/Procesada/cuadrantes_con_SCITEL.gpkg")
+```
+
+## Construcción de indicadores y conjuntos de variables
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+cats = [c for c in delitos_por_sector.columns if c not in sectores.columns]
+
+tasas = delitos_por_sector[cats].div(data_por_sector["POBTOT"], axis=0) * 1000
+tasas = tasas.replace([np.inf, -np.inf], np.nan)
+tasas.columns = tasas.columns.str.replace(" ", "_")
+tasas = tasas.reset_index()
+
+print(tasas.shape)
+print(tasas.head())
+```
+
+Con el propósito de estandarizar las comparaciones entre sectores de distinto tamaño poblacional, los conteos absolutos se transformaron en tasas por cada 1,000 habitantes utilizando la población total (`POBTOT`) reportada por el INEGI. Asimismo, mediante la variable `fecha_hecho` y excluyendo la categoría `HECHO_NO_DELICTIVO`, se calcularon por cada sector la distribución porcentual de delitos por día de la semana y las tasas de incidencia anual para el periodo 2016–2024. Tras verificar que delitos críticos como `VIOLACIÓN`, `SECUESTRO_O_PLAGIO` y `FEMINICIDIO` mantuvieran una presencia adecuada en los 72 sectores analizados, se estructuraron tres conjuntos de variables con distintos componentes temporales:
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+c = pd.DataFrame(carpetas.drop(columns="geometry"))
+
+# sesión no tiene la columna sector
+if "sector" not in c.columns:
+    c["sector"] = get_polygon_for_points(sectores, carpetas).values
+
+# Quitamos los hechos no delictivos
+c = c[c["categoria_delito"] != "HECHO NO DELICTIVO"]
+
+c["fecha_hecho"] = pd.to_datetime(c["fecha_hecho"], errors="coerce")
+c = c.dropna(subset=["sector", "fecha_hecho"])
+
+#  % de delitos por día de la semana
+nombres = {0: "lunes", 1: "martes", 2: "miercoles", 3: "jueves",
+           4: "viernes", 5: "sabado", 6: "domingo"}
+c["dia_semana"] = c["fecha_hecho"].dt.dayofweek
+
+pct_dia = (c.groupby(["sector", "dia_semana"]).size()
+           .unstack(fill_value=0)
+           .reindex(columns=range(7), fill_value=0))
+pct_dia = pct_dia.div(pct_dia.sum(axis=1), axis=0) * 100
+pct_dia.columns = [f"pct_{nombres[d]}" for d in pct_dia.columns]
+
+#  Delitos por año en cada sector (por 1,000 habitantes)
+anios = range(2016, 2025)
+c["anio"] = c["fecha_hecho"].dt.year
+
+por_anio = (c[c["anio"].isin(anios)]
+            .groupby(["sector", "anio"]).size()
+            .unstack(fill_value=0)
+            .reindex(columns=anios, fill_value=0))
+por_anio = por_anio.div(data_por_sector["POBTOT"], axis=0) * 1000
+por_anio = por_anio.replace([np.inf, -np.inf], np.nan)
+por_anio.columns = [f"delitos_{a}" for a in por_anio.columns]
+
+# Unimos todo a tasas
+extra = pd.concat([pct_dia, por_anio], axis=1).rename_axis("sector_id").reset_index()
+tasas_ext = tasas.merge(extra, on="sector_id", how="left")
+
+print(tasas_ext.shape)
+print(tasas_ext.filter(like="pct_").describe().round(2))
+```
+
+```{python, echo=FALSE, output=FALSE, warning=FALSE}
+print(tasas_ext[["VIOLACIÓN", "SECUESTRO_O_PLAGIO", "FEMINICIDIO"]]
+      .apply(lambda col: (col > 0).sum()))
+```
+
+```{r, echo=FALSE, output= FALSE, warning=FALSE}
+library(tidymodels)
+library(tidyverse)
+library(tidyclust)
+library(factoextra)
+library(FactoMineR)
+library(cluster)
+library(ClusterR)
+library(NbClust)
+library(GGally)
+library(flextable)
+library(gt)
+library(kableExtra)
+library(vegan)
+library(igraph)
+```
+
+El primer conjunto integra únicamente las tasas por categoría delictiva para caracterizar el perfil general de la zona; el segundo suma la distribución porcentual semanal para identificar patrones temporales específicos por día; y el tercero incorpora las tasas anuales del periodo de estudio para evaluar la evolución de los delitos a lo largo del tiempo. Esta aproximación diferenciada permite separar el análisis del perfil delictivo estructural de las dinámicas temporales de cada sector.
+
+```{r, echo=FALSE, output= FALSE, warning=FALSE}
+# Datos base
+df <- py$tasas_ext %>% select(-HECHO_NO_DELICTIVO)
+
+# 1. Delitos 
+df_delitos <- df %>% select(-starts_with("pct_"), -starts_with("delitos_"))
+
+# 2. Delitos  + días
+df_delitos_dias <- df %>% select(-starts_with("delitos_"))
+
+# 3. Delitos  + años
+df_delitos_anios <- df %>% select(-starts_with("pct_"))
+```
+
+## Procesamiento de datos y evaluación de la tendencia al agrupamiento
+
+Para la aplicación del agrupamiento, cada conjunto de datos fue sometido a un preprocesamiento que consistió en excluir la variable identificadora `sector_id` del cálculo de distancias, imputar los valores faltantes mediante la mediana, aplicar una transformación logarítmica para reducir el efecto de valores extremos y estandarizar las variables. Antes de proceder con el agrupamiento, se evaluó la tendencia de los sectores a formar conglomerados mediante el estadístico de Hopkins, donde valores cercanos a 1 indican una clara estructura de agrupamiento y valores próximos a 0.5 sugieren una distribución aleatoria.
+
+```{r, echo=FALSE, output=FALSE, warning=FALSE}
+# Clustering 1
+
+receta_delitos <- recipe(~ ., data = df_delitos) %>%
+  update_role(sector_id, new_role = "id") %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_log(all_numeric_predictors(), offset = 1) %>%
+  step_normalize(all_numeric_predictors())
+
+df1_delitos <- bake(prep(receta_delitos), new_data = NULL)
+
+df_cluster_delitos <- df1_delitos %>%
+  select(-sector_id)
+```
+
+```{r, echo=FALSE, output=FALSE, warning=FALSE}
+# Clustering 2
+
+receta_dias <- recipe(~ ., data = df_delitos_dias) %>%
+  update_role(sector_id, new_role = "id") %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+df1_dias <- bake(prep(receta_dias), new_data = NULL)
+
+df_cluster_dias <- df1_dias %>%
+  select(-sector_id)
+```
+
+```{r, echo=FALSE, output=FALSE, warning=FALSE}
+# Clustering 3
+receta_anios <- recipe(~ ., data = df_delitos_anios) %>%
+  update_role(sector_id, new_role = "id") %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+df1_anios <- bake(prep(receta_anios), new_data = NULL)
+
+df_cluster_anios <- df1_anios %>%
+  select(-sector_id)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(knitr)
+library(dplyr)
+library(kableExtra) # <--- Asegúrate de tener cargada esta librería
+
+calcular_hopkins <- function(datos) {
+  set.seed(123)
+  Hopkins_tend <- factoextra::get_clust_tendency(datos, n = nrow(datos) - 1, gradient = list(low = "steelblue", high = "white"))
+  stat <- round(Hopkins_tend$hopkins_stat, 3)
+  interp <- ifelse(
+    stat > 0.7, "Los datos presentan una fuerte tendencia al agrupamiento (H > 0.7)",
+    ifelse(
+      stat > 0.5, "Existe una tendencia moderada al agrupamiento (H > 0.5)",
+      "Los datos presentan una distribución cercana al azar; podría no ser adecuado."
+    )
+  )
+  return(c(stat, interp))
+}
+
+res_delitos <- calcular_hopkins(df_cluster_delitos)
+res_dias <- calcular_hopkins(df_cluster_dias)
+res_anios <- calcular_hopkins(df_cluster_anios)
+
+tabla_hopkins <- tibble::tibble(
+  Conjunto = c("Delitos", "Delitos y días", "Delitos y años"),
+  `Estadístico Hopkins` = as.numeric(c(res_delitos[1], res_dias[1], res_anios[1])),
+  Interpretación = c(res_delitos[2], res_dias[2], res_anios[2])
+)
+
+knitr::kable(
+  tabla_hopkins,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "Evaluación de Tendencia al Agrupamiento (Estadístico Hopkins)"
+) %>%
+  kable_styling(
+    latex_options = c("hold_position", "scale_down") 
+  ) %>%
+  column_spec(3, width = "7.5cm") 
+```
+
+El conjunto de **Delitos y Años** presentan una distribución cercana al azar y podría no ser adecuado al agruparse. Para garantizar la estabilidad del estadístico y evitar sesgos por el uso de una sola semilla, se ejecutaron 30 simulaciones con 71 observaciones cada una.
+
+```{r, echo=FALSE, warning=FALSE}
+calcular_hopkins_varias_semillas <- function(datos) {
+  semillas <- 1:30
+  resultados <- sapply(semillas, function(s) {
+    set.seed(s)
+    get_clust_tendency(
+      datos,
+      n = nrow(datos) - 1
+    )$hopkins_stat
+  })
+  resultados
+}
+
+H_delitos <- calcular_hopkins_varias_semillas(df_cluster_delitos)
+H_dias    <- calcular_hopkins_varias_semillas(df_cluster_dias)
+H_anios   <- calcular_hopkins_varias_semillas(df_cluster_anios)
+
+tabla_resumen <- rbind(
+  "Delitos" = summary(H_delitos),
+  "Días"    = summary(H_dias),
+  "Años"    = summary(H_anios)
+)
+
+knitr::kable(
+  tabla_resumen,
+  format = "html",
+  digits = 4,
+  caption = "Resumen del Estadístico de Hopkins",
+  table.attr = 'style="margin-left: auto; margin-right: auto; width: 80%; border-collapse: collapse;"'
+)
+```
+
+Mientras que los conjuntos de **Delitos** y **Delitos y Días** alcanzaron medianas superiores a 0.88, lo que confirma una marcada estructura de agrupamiento, el conjunto de **Delitos y Años** fue descartado debido a su inestabilidad en las pruebas de Hopkins y a que una partición preliminar aisló un único sector, añadiendo redundancia con variables anuales que aportaban información similar a las tasas generales.
+
+## Clustering jerárquico y selección del método de enlace
+
+```{r,echo=FALSE, output=FALSE, warning=FALSE}
+dist_delitos <- dist(df_cluster_delitos, method = "euclidean")
+dist_dias <- dist(df_cluster_dias, method = "euclidean")
+#dist_anios <- dist(df_cluster_anios, method = "euclidean")
+```
+
+A partir de las observaciones estandarizadas se construyó una matriz de distancias euclidianas para servir como insumo en la formación de los grupos. Para seleccionar el algoritmo jerárquico más adecuado, se evaluaron los métodos de enlace `Average`, `Complete`, `Single`, `Ward.D` y `Ward.D2`.
+
+```{r, echo=FALSE, output=FALSE, warning=FALSE}
+# Clustering 1
+hc_average_delitos <- hclust(dist_delitos, method = "average")
+hc_complete_delitos <- hclust(dist_delitos, method = "complete")
+hc_single_delitos <- hclust(dist_delitos, method = "single")
+hc_ward_delitos <- hclust(dist_delitos, method = "ward.D")
+hc_ward2_delitos <- hclust(dist_delitos, method = "ward.D2")
+
+
+# Clustering 2
+hc_average_dias <- hclust(dist_dias, method = "average")
+hc_complete_dias <- hclust(dist_dias, method = "complete")
+hc_single_dias <- hclust(dist_dias, method = "single")
+hc_ward_dias <- hclust(dist_dias, method = "ward.D")
+hc_ward2_dias <- hclust(dist_dias, method = "ward.D2")
+
+```
+
+```{r, echo=FALSE, output=FALSE, warning=FALSE}
+comparar_cophenetica <- function(distancia, hc_average, hc_single, hc_complete, hc_ward, hc_ward2) {
+  
+  d_ave <- cophenetic(hc_average)
+  d_single <- cophenetic(hc_single)
+  d_comp <- cophenetic(hc_complete)
+  d_ward <- cophenetic(hc_ward)
+  d_ward2 <- cophenetic(hc_ward2)
+  
+  datos_tabla <- data.frame(
+    Metodo = c("Average", "Single", "Complete", "Ward", "Ward.D2"),
+    Correlacion = c(
+      cor(distancia, d_ave),
+      cor(distancia, d_single),
+      cor(distancia, d_comp),
+      cor(distancia, d_ward),
+      cor(distancia, d_ward2)
+    )
+  ) %>%
+    mutate(Correlacion = round(Correlacion, 4)) %>%
+    arrange(desc(Correlacion))
+  
+  datos_tabla
+}
+
+
+```
+
+```{r, echo=FALSE, warningt=FALSE}
+library(dplyr)
+
+tabla_delitos <- comparar_cophenetica(dist_delitos, hc_average_delitos, hc_single_delitos, hc_complete_delitos, hc_ward_delitos, hc_ward2_delitos)
+tabla_dias <- comparar_cophenetica(dist_dias, hc_average_dias, hc_single_dias, hc_complete_dias, hc_ward_dias, hc_ward2_dias)
+
+tabla_unificada <- tabla_delitos %>%
+  rename(Correlacion_Delitos = Correlacion) %>%
+  full_join(
+    tabla_dias %>% rename(Correlacion_Dias = Correlacion),
+    by = "Metodo"
+  )
+
+knitr::kable(
+  tabla_unificada,
+  format = "html",
+  col.names = c("Método", "Correlación (Delitos)", "Correlación (Días)"),
+  caption = "Comparación Cofenética - Delitos vs Días",
+  table.attr = 'style="margin-left: auto; margin-right: auto; width: 80%; border-collapse: collapse;"'
+)
+```
+
+La evaluación inicial con la correlación cofenética mostró valores más altos en los métodos `Average` y `Single`; sin embargo, este métrico únicamente indica qué tan bien conserva el dendrograma las distancias originales, mas no la interpretabilidad o calidad de la partición.
+
+```{r, echo=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="Dendrogramas por método de enlace para los conjuntos Delitos (fila superior) y Delitos y Días (fila inferior)."}
+par(mfrow = c(2, 4), mar = c(1, 3, 2, 1))
+
+for (m in c("ward.D2", "ward.D", "average", "complete")) {
+  plot(hclust(dist_delitos, method = m), hang = -1, cex = 0.4,
+       main = paste("Delitos -", m), xlab = "", sub = "")
+}
+
+for (m in c("ward.D2", "ward.D", "average", "complete")) {
+  plot(hclust(dist_dias, method = m), hang = -1, cex = 0.4,
+       main = paste("Días -", m), xlab = "", sub = "")
+}
+
+par(mfrow = c(1, 1))
+```
+
+La inspección visual reveló que `Average` y `Single` generaban encadenamiento y aislaban observaciones, dificultando la identificación de conglomerados diferenciados. Por el contrario, los enfoques de minimización de varianza (`Ward.D` y `Ward.D2`) mostraron estructuras mucho más equilibradas y compactas.
+
+Para complementar esta decisión, se aplicó el algoritmo de agrupamiento jerárquico aglomerativo AGNES (Agglomerative Nesting) y se evaluó su coeficiente aglomerativo.
+
+```{r, echo=FALSE, output=FALSE, warning=FALSE }
+comparar_agnes <- function(distancia) {
+ac_metric <- list(
+  Average  = agnes(distancia, diss = TRUE, method = "average")$ac,
+  Single   = agnes(distancia, diss = TRUE, method = "single")$ac,
+  Complete = agnes(distancia, diss = TRUE, method = "complete")$ac,
+  Ward     = agnes(distancia, diss = TRUE, method = "ward")$ac
+)
+
+tabla_agnes <- data.frame(
+  Metodo = names(ac_metric),
+  Coeficiente_Aglomerativo = unlist(ac_metric)
+) %>%
+  mutate(Coeficiente_Aglomerativo = round(Coeficiente_Aglomerativo, 4)) %>%
+  arrange(desc(Coeficiente_Aglomerativo))
+
+max_idx <- which.max(tabla_agnes$Coeficiente_Aglomerativo)
+
+tabla_agnes
+}
+```
+
+```{r, echo=FALSE, warning=FALSE}
+library(dplyr)
+
+tabla_agnes_delitos <- comparar_agnes(dist_delitos)
+tabla_agnes_dias <- comparar_agnes(dist_dias)
+
+colnames(tabla_agnes_delitos)[2] <- "Coeficiente_Delitos"
+colnames(tabla_agnes_dias)[2] <- "Coeficiente_Dias"
+
+tabla_unificada_agnes <- full_join(
+  tabla_agnes_delitos,
+  tabla_agnes_dias,
+  by = "Metodo"
+)
+
+knitr::kable(
+  tabla_unificada_agnes,
+  format = "html",
+  col.names = c("Método", "Coeficiente (Delitos)", "Coeficiente (Días)"),
+  caption = "Comparación AGNES - Delitos vs Días",
+  table.attr = 'style="margin-left: auto; margin-right: auto; width: 80%; border-collapse: collapse;"'
+)
+```
+
+El método `Ward` obtuvo el coeficiente más alto, superando el valor de 0.875 en ambos conjuntos de variables, lo que ratificó una alta cohesión interna en las fusiones sucesivas. La combinación de estos resultados respaldó formalmente la selección final del método de enlace `Ward.D2` para la construcción de los grupos.
+
+## Selección del número óptimo de clusters
+
+Una vez definido el método de enlace, se determinó el número adecuado de grupos mediante la combinación del método del codo (WSS) y el coeficiente de Silhouette, buscando el balance óptimo entre la cohesión interna de los sectores y la separación entre conglomerados.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=4, fig.cap="Método del Codo (Elbow) y Silhouette para Delitos"}
+library(parameters)
+library(patchwork)
+
+set.seed(123)
+elbow_delitos <- n_clusters_elbow(
+  df_cluster_delitos,
+  standardize = FALSE,
+  include_factors = FALSE,
+  clustering_function = stats::kmeans,
+  n_max = 10
+)
+
+si_delitos <- n_clusters_silhouette(
+  df_cluster_delitos,
+  standardize = FALSE,
+  include_factors = FALSE,
+  clustering_function = stats::kmeans,
+  n_max = 10
+)
+
+plot(elbow_delitos) + plot(si_delitos)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=4, fig.cap="Método del Codo (Elbow) y Silhouette para Delitos y Dias"}
+library(parameters)
+library(patchwork)
+
+set.seed(123)
+elbow_dias <- n_clusters_elbow(
+  df_cluster_dias,
+  standardize = FALSE,
+  include_factors = FALSE,
+  clustering_function = stats::kmeans,
+  n_max = 10
+)
+
+set.seed(123)
+si_dias <- n_clusters_silhouette(
+  df_cluster_dias,
+  standardize = FALSE,
+  include_factors = FALSE,
+  clustering_function = stats::kmeans,
+  n_max = 10
+)
+
+plot(elbow_dias) + plot(si_dias)
+```
+
+Aunque ambas métricas señalaron matemáticamente una solución inicial de $k = 2$, la inspección de esta partición mostró que únicamente aislaba valores atípicos sin reflejar perfiles delictivos diferenciados. Por esta razón, se examinaron valores superiores de $k$ priorizando la representatividad y la interpretabilidad de las agrupaciones.
+
+```{r, echo=FALSE, warning=FALSE}
+
+sil_k_delitos <- sapply(2:10, function(k) {
+  g <- cutree(hc_ward2_delitos, k = k)
+  mean(silhouette(g, dist_delitos)[, 3])
+})
+
+sil_k_dias <- sapply(2:10, function(k) {
+  g <- cutree(hc_ward2_dias, k = k)
+  mean(silhouette(g, dist_dias)[, 3])
+})
+
+tabla_comparativa <- data.frame(
+  k = 2:10,
+  Silhouette_Delitos = round(sil_k_delitos, 3),
+  Silhouette_Dias = round(sil_k_dias, 3)
+)
+
+knitr::kable(
+  tabla_comparativa,
+  format = "html",
+  caption = "Comparación Silhouette Promedio por Número de Clusters (k)",
+  table.attr = 'style="margin-left: auto; margin-right: auto; width: 60%; border-collapse: collapse;"'
+)
+```
+
+Al analizar los valores subsecuentes del coeficiente de Silhouette junto con la distribución y tamaño de los grupos, se seleccionó una partición de $k = 4$ para el primer conjunto de variables. Esta misma solución de $k = 4$ se mantuvo para el segundo conjunto al registrar el mayor valor de Silhouette dentro del rango de soluciones interpretables, permitiendo así caracterizar de forma consistente perfiles delictivos y patrones temporales bien delimitados entre los sectores.
+
+## Modelo final de clustering jerárquico y caracterización de clusters
+
+Una vez seleccionado el método de enlace **Ward.D2** y determinado el número idóneo de grupos, se ajustó el modelo final cortando los dendrogramas respectivos en $k = 4$ tanto para el conjunto de **Delitos** como para el de **Delitos y Días**.
+
+```{r, echo=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="Dendrogramas del Clustering Jerárquico: Delitos vs. Días"}
+par(mfrow = c(1, 2))
+
+hclust_spec_delitos <- hier_clust(
+  num_clusters = 4,
+  linkage_method = "ward.D2"
+) %>%
+  set_engine("stats")
+
+hclust_final_delitos <- fit(
+  hclust_spec_delitos,
+  ~.,
+  data = df_cluster_delitos
+)
+
+plot(hclust_final_delitos$fit, main = "Dendrograma - Delitos")
+
+hclust_spec_dias <- hier_clust(
+  num_clusters = 4,
+  linkage_method = "ward.D2"
+) %>%
+  set_engine("stats")
+
+hclust_final_dias <- fit(
+  hclust_spec_dias,
+  ~.,
+  data = df_cluster_dias
+)
+
+plot(hclust_final_dias$fit, main = "Dendrograma - Días")
+
+par(mfrow = c(1, 1))
+```
+
+Esta partición permitió asignar a cada uno de los sectores un grupo específico según la estructura jerárquica resultante de la fusión progresiva de las observaciones. Para caracterizar y diferenciar los perfiles de cada conglomerado, se calcularon los promedios de las variables de interés por cluster, facilitando así la comparación directa entre las dinámicas delictivas y patrones identificados.
+
+### Centroides
+
+Debido a la estandarización aplicada en el preprocesamiento, los valores de los centroides expresan la posición relativa de cada cluster con respecto al promedio general de las observaciones (con media cero y desviación estándar uno). En este sentido, los valores positivos indican una presencia o tasa superior al promedio, mientras que los valores negativos representan niveles inferiores al promedio.
+
+```{r, echo=FALSE, warning=FALSE, fig.width=14, fig.height=8, fig.cap="Mapas de Calor de Centroides por Cluster: Delitos vs. Días"}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tibble)
+library(patchwork)
+
+hc_preds_delitos <- extract_cluster_assignment(hclust_final_delitos)$.cluster
+
+centroides_delitos_long <- df_cluster_delitos %>%
+  mutate(.cluster = hc_preds_delitos) %>%
+  group_by(.cluster) %>%
+  summarise(across(everything(), mean)) %>%
+  column_to_rownames(".cluster") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable") %>%
+  pivot_longer(
+    cols = -Variable,
+    names_to = "Cluster",
+    values_to = "Valor"
+  )
+
+p_delitos <- ggplot(centroides_delitos_long, aes(x = Cluster, y = Variable, fill = Valor)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low = "#2171b5",
+    mid = "#f7f7f7",
+    high = "#b2182b",
+    midpoint = 0
+  ) +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Centroides - Delitos",
+    x = "Cluster",
+    y = NULL,
+    fill = "Valor"
+  )
+
+hc_preds_dias <- extract_cluster_assignment(hclust_final_dias)$.cluster
+
+centroides_dias_long <- df_cluster_dias %>%
+  mutate(.cluster = hc_preds_dias) %>%
+  group_by(.cluster) %>%
+  summarise(across(everything(), mean)) %>%
+  column_to_rownames(".cluster") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable") %>%
+  pivot_longer(
+    cols = -Variable,
+    names_to = "Cluster",
+    values_to = "Valor"
+  )
+
+p_dias <- ggplot(centroides_dias_long, aes(x = Cluster, y = Variable, fill = Valor)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low = "#2171b5",
+    mid = "#f7f7f7",
+    high = "#b2182b",
+    midpoint = 0
+  ) +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Centroides - Días",
+    x = "Cluster",
+    y = NULL,
+    fill = "Valor"
+  )
+
+p_delitos + p_dias
+
+```
+
+
+
+## Caracteristicas de los Clusters
+
+```{r, echo=FALSE, output=FALSE, warning=FALSE}
+hc_preds_delitos <- extract_cluster_assignment(hclust_final_delitos)$.cluster
+
+tabla_centroides_delitos <- df_cluster_delitos %>%
+  mutate(.cluster = hc_preds_delitos) %>%
+  group_by(.cluster) %>%
+  summarise(across(everything(), mean)) %>%
+  column_to_rownames(".cluster") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable")
+
+hc_preds_dias <- extract_cluster_assignment(hclust_final_dias)$.cluster
+
+tabla_centroides_dias <- df_cluster_dias %>%
+  mutate(.cluster = hc_preds_dias) %>%
+  group_by(.cluster) %>%
+  summarise(across(everything(), mean)) %>%
+  column_to_rownames(".cluster") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable")
+
+kable(
+  tabla_centroides_delitos, 
+  digits = 2, 
+  caption = "Centroides por Cluster - Delitos"
+)
+
+kable(
+  tabla_centroides_dias, 
+  digits = 2, 
+  caption = "Centroides por Cluster - Días"
+)
+```
+
+
+## Conjunto de variables: Delitos
+
+El Cluster 1 representa un patrón de criminalidad violenta con una altísima incidencia en delitos de impacto social grave y violencia directa. Este grupo destaca por presentar las puntuaciones más elevadas en lesiones dolosas por disparo de arma de fuego, homicidio doloso, feminicidio, robo a transeúnte en vía pública y delitos de bajo impacto, además de registrar niveles significativos en violaciones y robos a bordo de transporte público (metro y repartidor). En conjunto, constituye el perfil con mayor concentración de delitos letales y asaltos en la vía pública.
+
+El Cluster 2 concentra delitos patrimoniales de alta oportunidad y extorsión, caracterizándose por una combinación de violencia y logística en puntos específicos. Lidera holgadamente en rubros como robo a pasajero en taxi, robo a cuentahabiente saliendo del cajero, secuestro o plagio, robo a casa habitación con violencia y robo de vehículo. Aunque comparte con el Cluster 1 niveles altos en violación y robo a transeúnte, se diferencia marcadamente por mostrar valores negativos en homicidio doloso y robos a transporte público o repartidores, lo que apunta a dinámicas delictivas orientadas a objetivos económicos específicos.
+
+El Cluster 3 refleja un comportamiento cercano a la media general, sin picos pronunciados en prácticamente ninguna categoría delictiva. Sus valores oscilan levemente alrededor de cero, registrando pequeñas variaciones positivas en robo a pasajero a bordo de microbús y vehículo, pero con valores predominantemente negativos o nulos en los delitos de mayor gravedad. Este perfil representa zonas con una actividad delictiva promedio o de baja intensidad relativa dentro de la muestra.
+
+El Cluster 4 define un entorno de muy bajo riesgo o de alta contención criminal. Muestra valores consistentemente negativos en la totalidad de las variables analizadas, alcanzando sus niveles más bajos en categorías clave como robo a negocio con violencia, robo a transeúnte, robo de vehículo, robo a repartidor y lesiones por arma de fuego. Por ello, representa el perfil de mayor seguridad dentro del agrupamiento analizado.
+
+## Conjunto de variables: Delitos y Días
+
+El Cluster 1 concentra la máxima actividad criminal violenta y patrimonial, con un comportamiento fuertemente marcado hacia el cierre de la semana laboral. Registra las puntuaciones más elevadas en delitos de alto impacto como robo a pasajero en el metro, delitos de bajo impacto, robo a transeúnte en vía pública, violación, robo a repartidor, robo a negocio con violencia, feminicidio y secuestro. En términos temporales, la incidencia se incrementa progresivamente desde el miércoles hasta alcanzar su punto máximo los viernes y sábados, disminuyendo drásticamente los domingos y durante los primeros días de la semana (lunes y martes).
+
+El Cluster 2 reúne un perfil de delitos patrimoniales y de oportunidad focalizados en días laborables. Encabeza los registros en robo a casa habitación con violencia, robo a cuentahabiente saliendo del cajero y robo a pasajero en taxi, manteniendo niveles significativos en secuestro y robo de vehículo. Su patrón temporal muestra una concentración entre martes y viernes (con su pico entre miércoles y jueves) y un desplome durante el fin de semana, reflejando dinámicas delictivas ligadas a la actividad bancaria, comercial y de movilidad laboral en días hábiles.
+
+El Cluster 3 describe un comportamiento de baja intensidad sin picos delictivos severos en ningún rubro, representando el nivel base o promedio. A diferencia de los demás grupos, muestra un patrón temporal invertido con valores levemente positivos durante el fin de semana (sábado y domingo) y una reducción moderada a mitad de la semana laboral (miércoles a viernes), lo que sugiere una actividad delictiva residual no asociada a concentraciones críticas de violencia.
+
+El Cluster 4 define un patrón caracterizado por la concentración extrema de violencia letal en fines de semana. Este grupo presenta las puntuaciones más altas en homicidio doloso y lesiones por disparo de arma de fuego, acompañadas de niveles elevados en feminicidio, robo a transeúnte y robo a repartidor. Su comportamiento temporal se concentra en el fin de semana, destacando el sábado y el domingo, mientras se mantiene marcadamente negativo en los días laborables (especialmente el miercoles), perfilando eventos de alta violencia interpersonal asociados a las dinámicas de ocio de fin de semana.
+
+## Distribución espacial de los clusters
+
+Para complementar la caracterización de los agrupamientos y analizar su dimensión geográfica, los resultados de ambos análisis se integraron con la información cartográfica mediante la variable clave `sector_id`. A partir de esta vinculación, se elaboró un mapa para cada conjunto de variables, lo que permitió examinar la distribución espacial de los grupos e identificar patrones de concentración territorial, continuidad geográfica o dispersión de los perfiles delictivos a lo largo de los sectores analizados.
+
+```{r, echo=FALSE, warning=FALSE}
+mapa_clusters <- data.frame(
+  sector_id = df_delitos$sector_id,
+  cluster_delitos = as.character(hc_preds_delitos),
+  cluster_dias = as.character(hc_preds_dias)
+)
+```
+
+```{python, echo=FALSE, warning=FALSE}
+sectores.reset_index()[["sector_id", "geometry"]].to_file(
+    "Data/Procesada/sectores.gpkg", driver="GPKG"
+)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=6, fig.cap="Distribución espacial de clústeres delictivos por sectores: comparación entre volumen de delitos y patrones temporales por día"}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+sectores_sf <- st_read("Data/Procesada/sectores.gpkg", quiet = TRUE)
+
+mapa_clusters <- data.frame(
+  sector_id = df_delitos$sector_id,
+  delitos   = as.character(hc_preds_delitos),
+  dias      = as.character(hc_preds_dias)
+)
+
+# Paleta de colores
+azules <- c("#c6dbef", "#6baed6", "#2171b5", "#08306b")
+
+# Para el conjunto de variables: Delitos
+etiq_delitos <- c(
+  Cluster_4 = "Baja incidencia",
+  Cluster_3 = "Cercano al promedio",
+  Cluster_2 = "Robo patrimonial y secuestro",
+  Cluster_1 = "Alta violencia y delitos letales"
+)
+
+# Para el conjunto de variables: Delitos y Días
+etiq_dias <- c(
+  Cluster_3 = "Cercano al promedio",
+  Cluster_2 = "Robo patrimonial entre semana",
+  Cluster_4 = "Violencia armada y homicidios en fin de semana",
+  Cluster_1 = "Alta violencia y robos en cierre de semana"
+  
+)
+
+mapa_cluster <- function(columna, etiquetas, titulo) {
+  
+  # 1. Crear dataframe de mapeo seguro para evitar errores de subíndice
+  df_etiquetas <- data.frame(
+    codigo = names(etiquetas),
+    grupo_nombre = unname(etiquetas),
+    stringsAsFactors = FALSE
+  )
+  
+  # 2. Unir datos con sectores
+  d <- sectores_sf %>%
+    left_join(mapa_clusters, by = "sector_id") %>%
+    rename(col_eval = all_of(columna)) %>%
+    # Si las predicciones vienen como "1" o "2" en lugar de "Cluster_1", lo homogeneizamos:
+    mutate(col_eval = if_else(!grepl("^Cluster_", col_eval), paste0("Cluster_", col_eval), col_eval)) %>%
+    left_join(df_etiquetas, by = c("col_eval" = "codigo")) %>%
+    mutate(grupo = factor(grupo_nombre, levels = unname(etiquetas)))
+
+  ggplot(d) +
+    geom_sf(aes(fill = grupo), color = "grey30", linewidth = 0.15) +
+    scale_fill_manual(
+      values = setNames(azules, unname(etiquetas)),
+      name = NULL, 
+      drop = FALSE
+    ) +
+    labs(title = titulo) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "vertical",
+      legend.box.just = "center",
+      legend.text = element_text(hjust = 0.5),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 12)
+    )
+}
+
+p1 <- mapa_cluster("delitos", etiq_delitos, "Delitos")
+p2 <- mapa_cluster("dias", etiq_dias, "Delitos + Días")
+
+(p1 + p2) & theme(plot.margin = margin(10, 10, 10, 10))
+```
+```{python, echo=FALSE, warning= FALSE}
+alcaldia_por_sector = sectores.reset_index()[["sector_id", "alcaldi"]].rename(columns={"alcaldi": "alcaldia"})
+```
+
+
+```{r, echo=FALSE, output=FALSE, warning= FALSE}
+tabla_final <- data.frame(
+  sector_id       = df_delitos$sector_id,
+  cluster_delitos = hc_preds_delitos,
+  cluster_dias    = hc_preds_dias
+) %>%
+  left_join(py$alcaldia_por_sector, by = "sector_id") %>%
+  select(sector_id, alcaldia, cluster_delitos, cluster_dias)
+
+knitr::kable(tabla_final, caption = "Sectores, alcaldía y cluster asignado (Delitos y Delitos + Días)")
+```
+
+Como cierre del análisis, se identificaron las alcaldías con mayor presencia de sectores clasificados en el perfil de alta violencia y delitos letales, cruzando la asignación de clusters con la alcaldía correspondiente a cada sector. Esto permite traducir los hallazgos del clustering en una unidad administrativa más familiar para la toma de decisiones, en lugar de limitarse a los códigos de sector.
+
+
+
+```{r, echo=FALSE, warning=FALSE, cap="Alcaldías y número de sectores por alcaldía"}
+tabla_alcaldias <- py$alcaldia_por_sector %>%
+  count(alcaldia, name = "n_sectores") %>%
+  arrange(desc(n_sectores))
+
+knitr::kable(tabla_alcaldias, caption = "Alcaldías y número de sectores por alcaldía")
+```
+
+Se encontró que las alcaldías Iztapalapa, seguida de Cuauhtémoc y Gustavo A. Madero que concentran el mayor número de sectores con este perfil, mientras que otras, como Cuajimalpa, Magdalena Contreras, Milpa Alta, Tlahuac y Xochimilco, no presentan ningún sector clasificado dentro de los grupos de mayor incidencia. Esto sugiere que, aunque el análisis se realizó a nivel de sector, los perfiles delictivos identificados no se distribuyen de manera uniforme entre alcaldías, sino que tienden a concentrarse geográficamente.
+
+# Conclusión
+
+En conclusión, la caracterización de los agrupamientos demuestra que la delincuencia en los sectores analizados no opera de manera homogénea, sino que se segmenta en perfiles especializados con dinámicas espaciales y temporales bien definidas. Mientras que el análisis enfocado exclusivamente en las categorías delictivas evidencia una clara graduación del riesgo, que abarca desde sectores de alta contención y baja intensidad hasta zonas con severa concentración de delitos patrimoniales y violencia letal, la incorporación de los días de la semana revela que estos patrones están fuertemente condicionados por las rutinas urbanas. De este modo, los delitos patrimoniales se alinean con la actividad financiera y comercial de días hábiles, los robos y violencia física se intensifican hacia el cierre de la semana laboral, y los episodios de mayor letalidad se concentran marcadamente durante el fin de semana. Estos hallazgos confirman que integrar el componente temporal resulta fundamental para reducir la ambigüedad en la caracterización criminal y diseñar estrategias de prevención focalizadas y oportunas.
+
+Por ultimo, la agregación de los resultados a nivel de demarcación territorial demuestra que la incidencia delictiva no solo se agrupa por patrones operativos y temporales, sino que presenta una clara concentración geográfica en la ciudad. La presencia predominante del perfil de alta violencia y delitos letales en un número reducido de alcaldías (Iztapalapa, Cuauhtémoc y Gustavo A. Madero), frente a su total ausencia en zonas como Cuajimalpa, La Magdalena Contreras, Milpa Alta, Tláhuac y Xochimilco, evidencia la existencia de dinámicas territoriales bien delimitadas. Este hallazgo resulta clave para la toma de decisiones administrativas y la política pública, ya que permite superar la escala fragmentada de los sectores operativos y justifica la focalización prioritaria de recursos de seguridad e intervención social en las demarcaciones con mayor criticidad estructural.
