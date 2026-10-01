@@ -106,6 +106,7 @@ sectores.set_index("sector_id", inplace= True)
 
 ```
 
+
 ```{python, echo=FALSE, output= FALSE, warning=FALSE}
 sectores.plot(color= "white", edgecolor='black')
 plt.show()
