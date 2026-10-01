@@ -9,6 +9,6 @@ CSV en la página https://datos.cdmx.gob.mx/dataset/carpetas-de-investigacion-fg
 # Intrucciones para el Dashboard 
 
 !. Acceda a la liga del drive de Bruno. Si no puede acceder, escriba un correo a brunodc86@gmail.com y le dará acceso.
-2. Descargue
-3. Compile
+2. Descargue.
+3. Compile.
 4. Verá un dashboard similar a este: https://br123-dashboard-carpetas-cdmx.share.connect.posit.cloud/
