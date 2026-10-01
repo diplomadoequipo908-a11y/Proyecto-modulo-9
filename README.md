@@ -8,7 +8,17 @@ CSV en la página https://datos.cdmx.gob.mx/dataset/carpetas-de-investigacion-fg
 
 # Intrucciones para el Dashboard 
 
-!. Acceda a la liga del drive de Bruno. Si no puede acceder, escriba un correo a brunodc86@gmail.com y le dará acceso.
-2. Descargue.
-3. Compile.
-4. Verá un dashboard similar a este: https://br123-dashboard-carpetas-cdmx.share.connect.posit.cloud/
+Dashboard disponible en:  https://br123-dashboard-carpetas-cdmx.share.connect.posit.cloud/
+
+
+El código del dashboard se encuentra en Dashboards_carpetas_JGJCDMX
+
+Por cuestiones de tamaño, este repositorio no incluye los archivos de datos procesados necesarios para ejecutar el dashboard.
+
+Los datos pueden descargarse desde el siguiente enlace:
+
+https://drive.google.com/drive/folders/1q66H36fUn2OPfYZFMq9xHAt625fHVGzD?usp=drive_link
+
+Una vez descargados, coloca los archivos dentro de la carpeta `Dashboards_carpetas_JGJCDMX/data/`.
+
+Para ejecutar el dashboard, abre el proyecto en RStudio y corre app.R
